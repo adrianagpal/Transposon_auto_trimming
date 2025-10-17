@@ -8,7 +8,7 @@ fi
 
 input_fasta=$1     # Archivo que contiene todas las secuencias (de donde extraer headers)
 library=$2         # Librería de TE que se pasa a TE-Aid
-output_dir="dm6example"
+output_dir="te-aid"
 
 # Crear carpeta de salida si no existe
 mkdir -p "$output_dir"
