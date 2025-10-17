@@ -8,7 +8,7 @@ fi
 
 input_fasta=$1     # Archivo que contiene todas las secuencias (de donde extraer headers)
 library=$2         # Librería de TE que se pasa a TE-Aid
-output_dir="te-aid"
+output_dir="te_aid"
 
 # Crear carpeta de salida si no existe
 mkdir -p "$output_dir"
@@ -22,7 +22,8 @@ grep ">" "$input_fasta" | sed 's/\r$//' | while read -r header; do
     echo "Header: $header"
 
     # Mantener el '>' en el header
-    outname=$(echo "$header" | sed 's/>//' | sed 's#[/\\]#_#g' | sed 's/#/_/g')
+    #outname=$(echo "$header" | sed 's/>//' | sed 's#[/\\]#_#g')
+    outname=$(echo "$header" | sed 's/>//' | sed 's#[/\\]#_#g' | cut -d'#' -f1)
 
     # Extraer la secuencia en TE.fasta
     $DIR/extractfasta.sh H "$header" "$input_fasta" > TE.fasta
