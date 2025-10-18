@@ -109,7 +109,7 @@ def datos_entrenamiento(caso):
 nombre_salida = "output.fasta"
 with open(nombre_salida, "w") as archivo_salida:
     for caso in range(1, 4):
-        for _ in range(50):
+        for _ in range(10):
             archivo_salida.write(datos_entrenamiento(caso) + "\n")
 
 print(f"Archivo generado: {nombre_salida}")
