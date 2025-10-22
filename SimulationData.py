@@ -43,48 +43,57 @@ def datos_entrenamiento(caso):
         print("Error: No se encontraron secuencias en el archivo FASTA.")
         exit()
 
+    min_length = 5000
+    filtered_sequences = [seq for seq in sequences if len(seq) > min_length]
+
     if caso == 1:
-        random_sequence1 = random.choice(sequences)
-        min_starting_pos_1 = min(len(random_sequence1.seq), total_length // 2)
+        seq1_choice = random.choice(sequences)
+        min_starting_pos_1 = min(len(seq1_choice.seq), total_length // 2)
         starting_pos_1 = random.randint(min_starting_pos_1, total_length // 2)
                 
-        random_sequence2 = random.choice(sequences)
-        min_starting_pos_2 = min(starting_pos_1 + len(random_sequence1.seq), total_length - len(random_sequence1.seq))
+        seq2_choice = random.choice(sequences)
+        min_starting_pos_2 = min(starting_pos_1 + len(seq1_choice.seq), total_length - len(seq1_choice.seq))
         starting_pos_2 = random.randint(min_starting_pos_2, total_length - int(total_length * 0.1))
         
-        final_seq = generar_cadena(starting_pos_1) + str(random_sequence1.seq)
-        final_seq += generar_cadena(starting_pos_2 - len(random_sequence1.seq))
-        final_seq += str(random_sequence2.seq)
+        final_seq = generar_cadena(starting_pos_1) + str(seq1_choice.seq)
+        final_seq += generar_cadena(starting_pos_2 - len(seq1_choice.seq))
+        final_seq += str(seq2_choice.seq)
 
         if len(final_seq) < total_length:
             final_seq += generar_cadena(total_length - len(final_seq))
 
         final_seq = final_seq[:total_length]
-        return f">Caso{caso}_{random_sequence1.id}_{starting_pos_1}_{len(random_sequence1.seq)}\n{final_seq}"
+        return f">Caso{caso}_{seq1_choice.description}_{starting_pos_1}_{len(seq1_choice.seq)}\n{final_seq}"
 
     elif caso == 2:
-        final_seq_1, final_seq_2 = "", ""
+        if len(filtered_sequences) == 0:
+            raise ValueError("No hay secuencias con longitud >5000 para generar el caso 2")
 
-        random_sequence1 = random.choice(sequences)
-        sequence_str1 = str(random_sequence1.seq)
-                                
-        random_sequence2 = random.choice(sequences)
-        sequence_str2 = str(random_sequence2.seq)        
-                        
-        while len(final_seq_1) < total_length // 3:
-            final_seq_1 += sequence_str1
+        len_obj = total_length // 3
 
-        while len(final_seq_2) < total_length // 3:
-            final_seq_2 += sequence_str2
+        seq1_choice = random.choice(filtered_sequences)
+        seq1_seq = str(seq1_choice.seq)
 
-        seq_final = final_seq_1 + final_seq_2 + final_seq_1
-        missing = int((total_length - len(seq_final)) / 2) + 1
+        if len(seq1_seq) < len_obj:
+            sequence_1 = seq1_seq + generar_cadena(len_obj - len(seq1_seq))
+        else:
+            sequence_1 = seq1_seq[:len_obj]
+        
+        seq2_choice = random.choice(filtered_sequences)
+        seq2_seq = str(seq2_choice.seq)
 
-        if len(seq_final) < total_length:
-            seq_final = generar_cadena(missing) + seq_final + generar_cadena(missing)
+        if len(seq2_seq) < len_obj:
+            sequence_2 = seq2_seq + generar_cadena(len_obj - len(seq2_seq))
+        else:
+            sequence_2 = seq2_seq[:len_obj]
 
-        seq_final = seq_final[:total_length]
-        return f">Caso{caso}_{random_sequence1.id}_X_{len(sequence_str2)}\n{seq_final}"
+        final_seq = sequence_1 + sequence_2 + sequence_1
+
+        if len(final_seq) < total_length:
+            final_seq += generar_cadena(total_length - len(final_seq))
+
+        final_seq = final_seq[:total_length]
+        return f">Caso{caso}_{seq1_choice.description}_{len(seq1_seq)}_{len(seq2_seq)}\n{final_seq}"
 
     elif caso == 3:
         monomer_length = random.randint(5, 100)
@@ -103,13 +112,22 @@ def datos_entrenamiento(caso):
         microsatelite += (monomer * (remaining // monomer_length)) + monomer[:remaining % monomer_length]
         microsatelite = microsatelite[:total_length]
 
-        return f">Caso{caso}_{random_sequence.id}_{start_pos}_{sequence_length}\n{microsatelite}"
+        return f">Caso{caso}_{random_sequence.description}_{start_pos}_{sequence_length}\n{microsatelite}"
+
+    elif caso == 4: 
+        if len(filtered_sequences) == 0:
+            raise ValueError("No hay secuencias con longitud >5000 para generar el caso 4")
+        
+        sequence = random.choice(filtered_sequences)
+        seq4_seq = str(sequence.seq)
+
+        return f">Caso{caso}_{sequence.description}_0_{len(seq4_seq)}\n{seq4_seq}"
 
 # Output
 nombre_salida = "output.fasta"
 with open(nombre_salida, "w") as archivo_salida:
-    for caso in range(1, 4):
-        for _ in range(10):
+    for caso in range(1, 5):
+        for _ in range(3):
             archivo_salida.write(datos_entrenamiento(caso) + "\n")
 
 print(f"Archivo generado: {nombre_salida}")
