@@ -46,6 +46,7 @@ def generate_simulated_data(case, sequences, total_length=20000):
 
         if len(seq1_seq) < len_obj:
             sequence_1 = seq1_seq + generate_string(len_obj - len(seq1_seq))
+            len_obj = len(seq1_seq)
         else:
             sequence_1 = seq1_seq[:len_obj]
         
@@ -63,7 +64,7 @@ def generate_simulated_data(case, sequences, total_length=20000):
             final_seq += generate_string(total_length - len(final_seq))
 
         final_seq = final_seq[:total_length]
-        return f">Caso{case}_{seq1_choice.id}_0_{len(seq1_seq)}_{len_obj}_{len(seq2_seq)}_{seq1_species}\n{final_seq}"
+        return f">Caso{case}_{seq1_choice.id}_0_{len_obj}_{seq1_species}\n{final_seq}"
 
     elif case == 3:
         monomer_length = random.randint(5, 100)
