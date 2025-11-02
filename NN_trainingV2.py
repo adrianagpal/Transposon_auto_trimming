@@ -9,10 +9,10 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from Bio import SeqIO
 import numpy as np
-#from pdf2image import convert_from_path
-# from pdf2image.exceptions import PDFPageCountError
-# import cv2
-# from focal_loss import BinaryFocalLoss
+from pdf2image import convert_from_path
+from pdf2image.exceptions import PDFPageCountError
+import cv2
+from focal_loss import BinaryFocalLoss
 import os
 import sys
 from sklearn.base import TransformerMixin
@@ -243,10 +243,10 @@ def create_dataset(library, MCH_out, outputDir):
             feature_data1[n, :, :, :, 3] = structure_plot
 
             # Guarda el penúltimo valor del TE.id (posición de inicio)
-            start_pos = int(TE.id.split("_")[-2])
+            start_pos = int(TE.id.split("_")[-4])
 
             # Guarda el último valor del TE.id (longitud del TE)
-            TE_len = int(TE.id.split("_")[-1])
+            TE_len = int(TE.id.split("_")[-3])
 
             # Guarda en las etiquetas la posición de inicio y la de final, relativa a la longitud total
             labels[n, 0] = start_pos / 20000
@@ -452,7 +452,7 @@ def run_experiment(model, X_train, Y_train, X_dev, Y_dev, batch_size, num_epochs
     # Define el callback ReduceLROnPlateau
     # Reduce la tasa de aprendizaje si el val_loss no mejora durante 10 épocas
     lr_scheduler = tf.keras.callbacks.ReduceLROnPlateau(monitor='val_loss', factor=0.01, patience=10, verbose=1)
-    checkpoint_filepath = "/checkpoint/model.weights.h5"
+    checkpoint_filepath = "./checkpoint/model.weights.h5"
 
     # Guarda los pesos del modelo con mejor val_r2_score
     checkpoint_callback = tf.keras.callbacks.ModelCheckpoint(
@@ -855,4 +855,3 @@ if __name__ == '__main__':
             sys.exit(0)
     else:
         print("Option not found: " + option)
-
