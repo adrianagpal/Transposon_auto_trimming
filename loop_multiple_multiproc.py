@@ -8,65 +8,69 @@ import multiprocessing
 from functools import partial
 import shutil
 
+# Function that downloads a specific genome
 def download_genome(species_genome, zip_file, failure_log):
     try:
-        # Primer intento con --reference
+        # First try with --reference
         print(f"Intentando descargar {species_genome} con --reference...")
-        subprocess.run(["conda", "run", "-n", "MCHelper", "datasets", "download", 
+        subprocess.run(["conda", "run", "-n", "MC_helper_agp", "datasets", "download", 
             "genome", "taxon", species_genome, "--reference", "--filename", zip_file],
             check=True, capture_output=True, text=True
         )
-        print(f"Descarga con --reference completada para {species_genome}.")
+        print(f"Download with --reference completed for {species_genome}.")
 
     except subprocess.CalledProcessError as e:
         print(f"Fallo con --reference. Reintentando sin --reference para {species_genome}...")
         try:
-            # Segundo intento sin --reference
-            subprocess.run(["conda", "run", "-n", "MCHelper", "datasets", "download", 
+            # Second try without --reference
+            subprocess.run(["conda", "run", "-n", "MC_helper_agp", "datasets", "download", 
                 "genome", "taxon", species_genome, "--filename", zip_file],
                 check=True, capture_output=True, text=True
             )
-            print(f"Descarga sin --reference completada para {species_genome}.")
+            print(f"Download without --reference completed for {species_genome}.")
 
         except subprocess.CalledProcessError:
-            # Si tambien falla escribir en el log
+            # If also fails, it will write it on the log file
             with open(failure_log, "a") as f:
-                f.write(f"Error: No se pudo descargar el genoma de {species_genome}\n")
-            print(f"? Error: No se pudo descargar el genoma de {species_genome}. Registrado en {failure_log}.")
+                f.write(f"Error: Download not possible for {species_genome}\n")
+            print(f"Error: Download not possible for {species_genome}. Registered in {failure_log}.")
+            print(f"STDERR:\n{e.stderr}")
             return False
 
     return True
-    
+
+# Function that unzips a genome .zip file 
 def unzip_genome(zip_file, output_dir):
 
     if not os.path.exists(zip_file):
-        print(f"Error: No se encontro el archivo {zip_file}")
+        print(f"Error: File {zip_file} was not found")
         return False
 
     try:
-        # Crear carpeta de salida si no existe
+        # Create output folder it if doesnt exist
         os.makedirs(output_dir, exist_ok=True)
         
-        # Descomprimir el archivo
+        # Unzip the file
         with zipfile.ZipFile(zip_file, 'r') as zip_ref:
             zip_ref.extractall(output_dir)
         
-        print(f"Archivo {zip_file} descomprimido correctamente en {output_dir}")
+        print(f"File {zip_file} was unzipped in {output_dir}")
         return True
 
     except zipfile.BadZipFile:
-        print(f"Error: {zip_file} no es un archivo ZIP valido o esta corrupto.")
+        print(f"Error: {zip_file} is not a valid .zip file or it is corrupted.")
         return False
 
     except Exception as e:
-        print(f"Error inesperado al descomprimir {zip_file}: {e}")
+        print(f"Unexpected error while unzipping {zip_file}: {e}")
         return False
-        
+
+# Function that saves the path of the .fna genome file
 def find_fna_file(genome_dir, species_name, failure_log):
 
     fna_file = None
 
-    # Buscar recursivamente el primer archivo .fna
+    # Search recursively the first .fna file
     for root, dirs, files in os.walk(genome_dir):
         for file in files:
             if file.endswith(".fna"):
@@ -76,15 +80,16 @@ def find_fna_file(genome_dir, species_name, failure_log):
             break
 
     if fna_file:
-        print(f"Genoma de {species_name} descargado y descomprimido correctamente.")
-        print(f"Archivo .fna encontrado en: {fna_file}")
+        print(f"Genome of {species_name} downloaded and unzipped.")
+        print(f"File .fna found in: {fna_file}")
         return fna_file
     else:
         with open(failure_log, "a") as f:
-            f.write(f"Error: No se encontro archivo .fna para {species_name}\n")
-        print(f"Error: No se encontro archivo .fna para {species_name}. Registrado en {failure_log}.")
+            f.write(f"Error: File .fna for {species_name} couldnt be found.\n")
+        print(f"Error: File .fna for {species_name} couldnt be found. Registered in {failure_log}.")
         return None
-        
+
+# Function to get fasta header and run TE-Aid
 def run_extract_and_teaid(header, input_fasta, fna_file, output_base_dir="hola", env_name="te_aid"):
     # Extraer nombre del caso
     match_case = re.match(r'^>?([^#\s]+)', header)
@@ -196,8 +201,9 @@ def process_header(header, input_fasta, output_dir, failure_log, genomes_dir="./
             print(f"PDF renombrado como: {pdf_nuevo}")
             
             # Eliminar genoma para liberar espacio
-            if os.path.exists(genome_dir):
+            if os.path.exists(genome_dir) and os.path.exists(pdf_nuevo):
                 shutil.rmtree(genome_dir)
+                os.remove(zip_file)
                 print(f"Genoma {species_genome} eliminado para liberar espacio.")
         else:
             print(f"No se encontro el PDF esperado: {pdf_original}")
@@ -235,7 +241,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--input_fasta", required=True, help="Archivo FASTA de libreria")
     parser.add_argument("--output_dir", required=True, help="Archivo FASTA de libreria")
-    parser.add_argument("--processes", type=int, default=79, help="Numero de procesos paralelos")
+    parser.add_argument("--processes", type=int, default=20, help="Numero de procesos paralelos")
     parser.add_argument("--failure_log", default="descargas_fallidas.log", help="Archivo para guardar fallos")
     args = parser.parse_args()
 
@@ -247,3 +253,5 @@ if __name__ == "__main__":
         args.output_dir,
         args.failure_log
     )
+
+    
