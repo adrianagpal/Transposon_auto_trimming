@@ -85,12 +85,17 @@ def find_fna_file(genome_dir, species_name, failure_log):
         print(f"Error: No se encontro archivo .fna para {species_name}. Registrado en {failure_log}.")
         return None
         
-def run_extract_and_teaid(header, input_fasta, fna_file, output_dir, env_name="te_aid"):
-
+def run_extract_and_teaid(header, input_fasta, fna_file, output_base_dir="hola", env_name="te_aid"):
+    # Extraer nombre del caso
     match_case = re.match(r'^>?([^#\s]+)', header)
     nombre_caso = match_case.group(1) if match_case else re.sub(r'\W+', '_', header.strip())
 
-    te_fasta = f"{nombre_caso}.fasta"
+    # Crear carpeta de salida específica para el caso
+    case_dir = output_base_dir
+    os.makedirs(case_dir, exist_ok=True)
+
+    # Archivo FASTA de la TE
+    te_fasta = os.path.join(case_dir, f"{nombre_caso}.fasta")
 
     # Ejecutar extractfasta.sh
     print(f"Extrayendo secuencia {header} de {input_fasta}...")
@@ -106,7 +111,7 @@ def run_extract_and_teaid(header, input_fasta, fna_file, output_dir, env_name="t
         print(f"Error al ejecutar extractfasta.sh: {e.stderr}")
         return False
 
-    # Verificar si TE.fasta no est vaco
+    # Verificar si TE.fasta no está vacío
     if not os.path.exists(te_fasta) or os.path.getsize(te_fasta) == 0:
         print(f"Secuencia no encontrada para {header}")
         return False
@@ -117,13 +122,9 @@ def run_extract_and_teaid(header, input_fasta, fna_file, output_dir, env_name="t
 
     # Ejecutar TE-Aid
     print(f"Ejecutando TE-Aid con {te_fasta} y {fna_file}...")
-
-    os.makedirs(output_dir, exist_ok=True)
-
     try:
-
         result = subprocess.run(
-            f"source ~/anaconda3/etc/profile.d/conda.sh && conda activate {env_name} && ./TE-Aid -q {os.path.abspath(te_fasta)} -g {os.path.abspath(fna_file)} -o {os.path.abspath(output_dir)}",
+            f"source ~/anaconda3/etc/profile.d/conda.sh && conda activate {env_name} && ./TE-Aid -q {os.path.abspath(te_fasta)} -g {os.path.abspath(fna_file)} -o {os.path.abspath(case_dir)}",
             shell=True,
             capture_output=True,
             text=True,
@@ -131,14 +132,14 @@ def run_extract_and_teaid(header, input_fasta, fna_file, output_dir, env_name="t
         )
 
         print(result.stdout)
-    
+
         if result.returncode != 0:
             print(f"Error en TE-Aid:\n{result.stderr}")
             return False
-    
-        print(f"TE-Aid ejecutado correctamente. Resultados en: {output_dir}")
+
+        print(f"TE-Aid ejecutado correctamente. Resultados en: {case_dir}")
         return True
-    
+
     except Exception as e:
         print(f"Error inesperado al ejecutar TE-Aid: {e}")
         return False
@@ -156,12 +157,16 @@ def process_header(header, input_fasta, output_dir, failure_log, genomes_dir="./
 
         # Construcción de rutas
         species_genome = species
+        
+        match_case = re.match(r'^>?([^#\s]+)', header)
+        nombre_caso = match_case.group(1) if match_case else re.sub(r'\W+', '_', header.strip())
+        
         safe_name = species_genome.replace(" ", "_")
         zip_file = os.path.abspath(os.path.join(genomes_dir, f"{safe_name}.zip"))
         genome_dir = os.path.abspath(os.path.join(genomes_dir, f"{safe_name}_genome"))
 
         # Crear subdirectorio de salida para la especie
-        species_output_dir = os.path.join(output_dir, safe_name)
+        species_output_dir = os.path.join(output_dir, nombre_caso)
         os.makedirs(species_output_dir, exist_ok=True)
 
         # Descargar y procesar
@@ -182,13 +187,12 @@ def process_header(header, input_fasta, output_dir, failure_log, genomes_dir="./
         run_extract_and_teaid(header, input_fasta, fna_path, species_output_dir)
         
         # Renombrar PDF generado por TE-Aid
-        match_case = re.match(r'^>?([^#\s]+)', header)
-        nombre_caso = match_case.group(1) if match_case else re.sub(r'\W+', '_', header.strip())
-        pdf_original = os.path.join(species_output_dir, f"{nombre_caso}.fasta.c2g.pdf")  # o .c2g.pdf según versión
-        pdf_nuevo = os.path.join(species_output_dir, f"{nombre_caso}.pdf")
+        pdf_original = os.path.join(species_output_dir, f"{nombre_caso}.fasta.c2g.pdf") 
+        pdf_nuevo = f"{species_output_dir}.pdf"
 
         if os.path.exists(pdf_original):
             os.rename(pdf_original, pdf_nuevo)
+            shutil.rmtree(species_output_dir)
             print(f"PDF renombrado como: {pdf_nuevo}")
             
             # Eliminar genoma para liberar espacio
@@ -225,17 +229,13 @@ def generation_multiprocessing(input_fasta, n_processes, output_dir, failure_log
         for p in batch:
             p.start()
         for p in batch:
-            p.join()
-
-def process_chunk(headers_chunk, input_fasta, tmp_output_dir):
-    for header in headers_chunk:
-        process_header(header, input_fasta, tmp_output_dir)            
+            p.join()        
                 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--input_fasta", required=True, help="Archivo FASTA de libreria")
     parser.add_argument("--output_dir", required=True, help="Archivo FASTA de libreria")
-    parser.add_argument("--processes", type=int, default=20, help="Numero de procesos paralelos")
+    parser.add_argument("--processes", type=int, default=79, help="Numero de procesos paralelos")
     parser.add_argument("--failure_log", default="descargas_fallidas.log", help="Archivo para guardar fallos")
     args = parser.parse_args()
 
