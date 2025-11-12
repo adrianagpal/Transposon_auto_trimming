@@ -1,6 +1,8 @@
+# -*- coding: utf-8 -*-
 from tensorflow.keras import layers
 import tensorflow as tf
 from tensorflow.keras import backend as K
+from tensorflow.keras.utils import plot_model
 from sklearn.metrics import confusion_matrix, accuracy_score, f1_score, recall_score, precision_score, \
     classification_report
 from sklearn.model_selection import train_test_split
@@ -9,8 +11,8 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from Bio import SeqIO
 import numpy as np
-from pdf2image import convert_from_path
-from pdf2image.exceptions import PDFPageCountError
+#from pdf2image import convert_from_path
+#from pdf2image.exceptions import PDFPageCountError
 import cv2
 from focal_loss import BinaryFocalLoss
 import os
@@ -21,6 +23,7 @@ from tensorflow.keras.callbacks import EarlyStopping
 from tensorflow.compat.v1 import ConfigProto
 from tensorflow.compat.v1 import InteractiveSession
 from sklearn.metrics import r2_score
+import fitz
 
 config = ConfigProto()
 config.gpu_options.allow_growth = True
@@ -83,9 +86,6 @@ class NDStandardScaler(TransformerMixin):
         self._scaler = load(open(model_path, 'rb'))
         self._orig_shape = X.shape[1:]
 
-# Para qué se usa??
-# se usa para dividir imágenes en pequeños bloques cuadrados o “patches”
-# es un paso común en modelos como los Vision Transformers
 class Patches(layers.Layer):
     def __init__(self, patch_size):
         super(Patches, self).__init__()
@@ -107,8 +107,8 @@ class Patches(layers.Layer):
         patches = tf.reshape(patches, [batch_size, -1, patch_dims])
         return patches
 
-# Implementación típica de un Vision Transformer (ViT). 
-# Sirve para codificar los patches extraídos de una imagen, antes de enviarlos a capas tipo Transformer.
+# Implementacion tipica de un Vision Transformer (ViT). 
+# Sirve para codificar los patches extraidos de una imagen, antes de enviarlos a capas tipo Transformer.
 class PatchEncoder(layers.Layer):
     def __init__(self, num_patches, projection_dim):
         super(PatchEncoder, self).__init__()
@@ -125,7 +125,7 @@ class PatchEncoder(layers.Layer):
 
 
 def recall_m(y_true, y_pred):
-    # K es un alias comúnmente usado para keras.backend
+    # K es un alias comunmente usado para keras.backend
     true_positives = K.sum(K.round(K.clip(y_true * y_pred, 0, 1)))
     possible_positives = K.sum(K.round(K.clip(y_true, 0, 1)))
     recall = true_positives / (possible_positives + K.epsilon())
@@ -159,7 +159,7 @@ def r2_score(y_true, y_pred):
     epsilon = tf.keras.backend.epsilon()
     # sum_squares = tf.maximum(sum_squares, epsilon)
 
-    # Coeficiente de determinación R2
+    # Coeficiente de determinacion R2
     R2 = 1 - sum_squares_residuals / sum_squares
     return R2
 
@@ -173,10 +173,10 @@ def metrics(Y_validation, predictions, name):
     print('Specificity:', recall_score(Y_validation, predictions, pos_label=0, average='weighted'))
     print('\n clasification report:\n', classification_report(Y_validation, predictions))
     print('\n confusion matrix:\n', confusion_matrix(Y_validation, predictions))
-    # Creamos la matriz de confusión
+    # Creamos la matriz de confusion
     snn_cm = confusion_matrix(Y_validation, predictions)
 
-    # Visualizamos la matriz de confusión
+    # Visualizamos la matriz de confusion
     snn_df_cm = pd.DataFrame(snn_cm, range(classes), range(classes))
     plt.figure(figsize=(20, 14))
     sn.set(font_scale=1.4)  # for label size
@@ -200,31 +200,77 @@ def write_sequences_file(sequences, filename):
         sys.exit(0)
 
 # Crea un dataset en matrices numpy a partir de la lista de TEs y de sus plots
-# También genera una matriz con las etiquetas con la información de posiciones de inicio y final
-# Esto se hace para poder predecir estas posiciones a partir de la información de los plots
+# Tambien genera una matriz con las etiquetas con la información de posiciones de inicio y final
+# Esto se hace para poder predecir estas posiciones a partir de la informacion de los plots
+
+def count_good_pdfs(MCH_out):
+    pdf_dir = os.path.join(MCH_out, "te_aid")
+    pdf_files = [f for f in os.listdir(pdf_dir) if f.endswith(".pdf")]
+
+    count_good = 0
+    count_bad = 0
+
+    for pdf_file in pdf_files:
+        pdf_path = os.path.join(pdf_dir, pdf_file)
+        try:
+            # Verifica tamaño > 4 KB
+            if os.path.getsize(pdf_path) <= 4 * 1024:
+                count_bad += 1
+                continue
+
+            # Intenta abrir el PDF
+            doc = fitz.open(pdf_path)
+            if len(doc) > 0:
+                count_good += 1
+            else:
+                count_bad += 1
+
+        except Exception:
+            count_bad += 1
+
+    return count_good, count_bad
 
 def create_dataset(library, MCH_out, outputDir):
     # Lee el archivo fasta library y devuelve una lista de objetos SeqRecord con atributos como TE.id y TE.seq
     TEs = [TE for TE in SeqIO.parse(library, "fasta")]
+    
+    good_pdfs, bad_pdfs = count_good_pdfs(MCH_out)
+    
     # Para cada secuencia TE, crea una matriz
-    feature_data1 = np.zeros((len(TEs), 256, 256, 3, 4), dtype=np.int16)
-    # Crea una matriz para almacenar las categorías como etiquetas
-    labels = np.zeros((len(TEs), 2))
+    feature_data1 = np.zeros((good_pdfs, 256, 256, 3, 4), dtype=np.int16)
+    # Crea una matriz para almacenar las categorias como etiquetas
+    labels = np.zeros((good_pdfs, 2))
+    
+    print(good_pdfs, bad_pdfs)
 
     n = 0
     for TE in TEs:
         print("Doing: " + TE.id)
         TE_name = TE.id.split("#")[0]
+        print(f"Doing: {TE_name}")
         try:
-            pages = convert_from_path(MCH_out + '/te_aid/' + TE_name + '.pdf')
-            print(MCH_out + '/te_aid/' + TE_name + '.fa.c2g.pdf')
+            pdf_path = MCH_out + '/te_aid/' + TE_name + '.pdf'
+            
+            if os.path.getsize(pdf_path) <= 4 * 1024:
+                continue
+                
+            doc = fitz.open(pdf_path)
 
             # Saving pages in jpeg format
-            for page in pages:
-                page.save(MCH_out + '/te_aid/' + TE_name + '.fa.c2g.jpeg', 'JPEG')
+            for page_index in range(len(doc)):
+                page = doc.load_page(page_index)
+                pix = page.get_pixmap(matrix=fitz.Matrix(200/72,200/72))
+                pix.save(MCH_out + '/te_aid/' + TE_name + '.fa.c2g.jpeg', 'JPEG')
 
             # Carga la imagen desde el archivo
             te_aid_image = cv2.imread(MCH_out + '/te_aid/' + TE_name + '.fa.c2g.jpeg')
+            
+            if te_aid_image is None:
+                print("ERROR: No se pudo abrir la imagen de", TE_name)
+                continue  # pasa al siguiente TE
+                
+            h, w, c = te_aid_image.shape
+            print(f"{TE_name}: h={h}, w={w}, c={c}")
 
             # Divide la imagen en distintos plots y les hace resize
             divergence_plot = cv2.resize(te_aid_image[150:1030, 150:1130, :], (256, 256))
@@ -236,19 +282,19 @@ def create_dataset(library, MCH_out, outputDir):
             plt.imshow(structure_plot, cmap='gray', interpolation='bicubic')
             plt.show()"""
 
-            # Guarda la información de los plots en la matriz feature_data1
+            # Guarda la informacion de los plots en la matriz feature_data1
             feature_data1[n, :, :, :, 0] = divergence_plot
             feature_data1[n, :, :, :, 1] = coverage_plot
             feature_data1[n, :, :, :, 2] = selfdot_plot
             feature_data1[n, :, :, :, 3] = structure_plot
 
-            # Guarda el penúltimo valor del TE.id (posición de inicio)
+            # Guarda el penultimo valor del TE.id (posición de inicio)
             start_pos = int(TE.id.split("_")[-4])
 
-            # Guarda el último valor del TE.id (longitud del TE)
+            # Guarda el ultimo valor del TE.id (longitud del TE)
             TE_len = int(TE.id.split("_")[-3])
 
-            # Guarda en las etiquetas la posición de inicio y la de final, relativa a la longitud total
+            # Guarda en las etiquetas la posicion de inicio y la de final, relativa a la longitud total
             labels[n, 0] = start_pos / 20000
             labels[n, 1] = (start_pos + TE_len) / 20000
             n += 1
@@ -261,7 +307,7 @@ def create_dataset(library, MCH_out, outputDir):
 
 
 # Creamos un modelo por cada rama para procesar tipos distintos de features (como divergence, coverage, etc.)
-# Después se generará un modelo completo que agrupe a todas las branches CNN
+# Despues se generara un modelo completo que agrupe a todas las branches CNN
 def cnn_branch(dim1, dim2, dim3, i):
     tf.keras.backend.clear_session()
 
@@ -450,7 +496,7 @@ def run_experiment(model, X_train, Y_train, X_dev, Y_dev, batch_size, num_epochs
         return None, None
 
     # Define el callback ReduceLROnPlateau
-    # Reduce la tasa de aprendizaje si el val_loss no mejora durante 10 épocas
+    # Reduce la tasa de aprendizaje si el val_loss no mejora durante 10 epocas
     lr_scheduler = tf.keras.callbacks.ReduceLROnPlateau(monitor='val_loss', factor=0.01, patience=10, verbose=1)
     checkpoint_filepath = "./checkpoint/model.weights.h5"
 
@@ -462,7 +508,7 @@ def run_experiment(model, X_train, Y_train, X_dev, Y_dev, batch_size, num_epochs
         save_weights_only=True,
     )
 
-    # Detiene el entrenamiento si val_loss no mejora durante 50 épocas
+    # Detiene el entrenamiento si val_loss no mejora durante 50 epocas
     # Restaura los pesos del modelo que obtuvo el mejor val_loss
     early_stopping = EarlyStopping(
         monitor='val_loss',
@@ -586,7 +632,7 @@ if __name__ == '__main__':
             model = auto_trimming(cnn_div, cnn_cov, cnn_dot, cnn_str)
             # summarize layers
             print(model.summary())
-            tf.keras.utils.plot_model(model, to_file='model_plot.png', show_shapes=True, show_layer_names=True)
+            #tf.keras.utils.plot_model(model, to_file='model_plot.png', show_shapes=True, show_layer_names=True)
 
             path_log_base = os.path.dirname(os.path.realpath(__file__))
             training_set = [X_train[:, :, :, :, 0], X_train[:, :, :, :, 1], X_train[:, :, :, :, 2],
@@ -705,7 +751,7 @@ if __name__ == '__main__':
             model = SmartInspection(cnn_div, cnn_cov, cnn_str, fnn) # SmartInspection es un tipo de clase
             # summarize layers
             print(model.summary())
-            tf.keras.utils.plot_model(model, show_shapes=True)
+            #tf.keras.utils.plot_model(model, show_shapes=True)
 
             path_log_base = os.path.dirname(os.path.realpath(__file__))
             epochs = 150
@@ -822,7 +868,7 @@ if __name__ == '__main__':
         X2_train = np.load(X2_train_str)
         Y_train = np.load(Y_train_str)
 
-        # Definir el número de batches
+        # Definir el numero de batches
         num_bat = 3
         row_per_batc = int(X1_train.shape[0] / num_bat)
 
