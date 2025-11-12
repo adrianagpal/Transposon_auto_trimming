@@ -1,13 +1,15 @@
+# -*- coding: utf-8 -*-
 import subprocess
 import zipfile
 import os
+import re
+import argparse
 
 def download_genome(species_genome, zip_file, failure_log):
     try:
         # Primer intento con --reference
         print(f"Intentando descargar {species_genome} con --reference...")
-        subprocess.run(
-            ["datasets", "download", "genome", "taxon", species_genome, "--reference", "--filename", zip_file],
+        subprocess.run(["conda", "run", "-n", "MCHelper", "datasets", "download", "genome", "taxon", species_genome, "--reference", "--filename", zip_file],
             check=True, capture_output=True, text=True
         )
         print(f"Descarga con --reference completada para {species_genome}.")
@@ -16,8 +18,7 @@ def download_genome(species_genome, zip_file, failure_log):
         print(f"Fallo con --reference. Reintentando sin --reference para {species_genome}...")
         try:
             # Segundo intento sin --reference
-            subprocess.run(
-                ["datasets", "download", "genome", "taxon", species_genome, "--filename", zip_file],
+            subprocess.run(["conda", "run", "-n", "MCHelper", "datasets", "download", "genome", "taxon", species_genome, "--filename", zip_file],
                 check=True, capture_output=True, text=True
             )
             print(f"Descarga sin --reference completada para {species_genome}.")
@@ -135,28 +136,66 @@ def run_extract_and_teaid(header, input_fasta, fna_file, output_dir, env_name="t
         return False
     
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--species_file", required=True, help="Archivo con nombres de especies")
+    parser.add_argument("--input_fasta", required=True, help="Archivo FASTA de libreria")
+    args = parser.parse_args()
+
+    input_fasta = args.input_fasta
+
+    # Leer las cabeceras del archivo FASTA
+    with open(input_fasta, "r") as fasta:
+        headers = [line.strip() for line in fasta if line.startswith(">")]
+
+    for header in headers:
+        # Extraer especie del header (por ejemplo: _Lineus_longissimus)
+        match = re.search(r'_([A-Z][a-z]+_[a-z]+)$', header)
+        if not match:
+            print(f"No se encontro especie en header: {header}")
+            continue
+
+        species = match.group(1).replace("_", " ")
+        print(f"?? Especie detectada: {species}")
+
+        # Construcción de rutas
+        species_genome = species
+        safe_name = species_genome.replace(" ", "_")
+        zip_file = f"./genomes/{safe_name}.zip"
+        genome_dir = f"./genomes/{safe_name}_genome"
+        failure_log = "descargas_fallidas.log"
+        output_dir = "./te_aid"
+
+        # Descargar y procesar
+        resultado = download_genome(species_genome, zip_file, failure_log)
+
+        if resultado:
+            if unzip_genome(zip_file, genome_dir):
+                fna_path = find_fna_file(genome_dir, species_genome, failure_log)
+                if fna_path:
+                    run_extract_and_teaid(header, input_fasta, fna_path, output_dir)
+                    
+                    print(f"? Listo para procesar: {fna_path}")                    
+                    pdf_original = os.path.join(output_dir, "TE.fasta.c2g.pdf")
+
+                    # Extraer solo la parte del caso antes del primer '#'
+                    match = re.match(r'^>?([^#\s]+)', header)
+                    if match:
+                        nombre_caso = match.group(1)
+                    else:
+                        # Por si no hay '#', limpiar el header completo
+                        nombre_caso = re.sub(r'[^A-Za-z0-9_.-]+', '_', header.strip())
+                    
+                    pdf_nuevo = os.path.join(output_dir, f"{nombre_caso}.pdf")
+                    
+                    if os.path.exists(pdf_original):
+                        os.rename(pdf_original, pdf_nuevo)
+                        print(f"?? PDF renombrado como: {pdf_nuevo}")
+                    else:
+                        print(f"?? No se encontro el PDF esperado: {pdf_original}")
     
-    species_genome = "Lineus longissimus"
-    safe_name = species_genome.replace(" ", "_")
-    zip_file = f"{safe_name}.zip"
-    genome_dir = f"{safe_name}_genome"
-    failure_log = "descargas_fallidas.log"
-
-    header = ">Caso1_BEL-12_LiLo#CLASSI/LTR/BELPAO_9920_7608_Lineus_longissimus"
-    input_fasta = "Drosophila_melanogaster2.fasta"
-    output_dir = "results_Aphyosemion_australe"
-   
-    # Descargar
-    resultado = download_genome(species_genome, zip_file, failure_log)
-
-    if resultado:
-        if unzip_genome(zip_file, genome_dir):
-            # Buscar el .fna
-            fna_path = find_fna_file(genome_dir, species_genome, failure_log)
-            if fna_path:
-                run_extract_and_teaid(header, input_fasta, fna_path, output_dir)
-                print(f"Listo para procesar: {fna_path}")
+                else:
+                    print(f"?? No se encontro archivo .fna para {species_genome}")
+            else:
+                print(f"?? Fallo al descomprimir {zip_file}")
         else:
-            print(f"Descarga correcta, pero fallo al descomprimir {zip_file}")
-    else:
-        print(f"Fallo en la descarga de {species_genome}")
+            print(f"? Fallo en la descarga de {species_genome}")
