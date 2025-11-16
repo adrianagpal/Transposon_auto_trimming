@@ -174,6 +174,13 @@ def process_header(header, input_fasta, output_dir, failure_log, genomes_dir="./
         species_output_dir = os.path.join(output_dir, nombre_caso)
         os.makedirs(species_output_dir, exist_ok=True)
 
+        print(f"Genome_directory: {genomes_dir}")
+        print(f"Species: {species_genome}")
+        
+        if os.path.exists(pdf_nuevo):
+            print(f"{multiprocessing.current_process().name} - PDF ya existe: {pdf_nuevo}")
+            return
+            
         # Descargar y procesar
         if not download_genome(species_genome, zip_file, failure_log):
             print(f"{multiprocessing.current_process().name} - Fallo en la descarga de {species_genome}")
