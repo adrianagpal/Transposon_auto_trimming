@@ -9,6 +9,7 @@ from functools import partial
 import shutil
 
 # Function that downloads a specific genome
+# It should work with MC_helper_agp/MCHelper envs
 def download_genome(species_genome, zip_file, failure_log):
     try:
         # First try with --reference
@@ -35,6 +36,7 @@ def download_genome(species_genome, zip_file, failure_log):
                 f.write(f"Error: Download not possible for {species_genome}\n")
             print(f"Error: Download not possible for {species_genome}. Registered in {failure_log}.")
             print(f"STDERR:\n{e.stderr}")
+            print("STDOUT:\n{e.stdout}")
             return False
 
     return True
@@ -90,7 +92,7 @@ def find_fna_file(genome_dir, species_name, failure_log):
         return None
 
 # Function to get fasta header and run TE-Aid
-def run_extract_and_teaid(header, input_fasta, fna_file, output_base_dir="hola", env_name="te_aid"):
+def run_extract_and_teaid(header, input_fasta, fna_file, output_base_dir, env_name="te_aid"):
     # Extraer nombre del caso
     match_case = re.match(r'^>?([^#\s]+)', header)
     nombre_caso = match_case.group(1) if match_case else re.sub(r'\W+', '_', header.strip())
@@ -148,106 +150,151 @@ def run_extract_and_teaid(header, input_fasta, fna_file, output_base_dir="hola",
     except Exception as e:
         print(f"Error inesperado al ejecutar TE-Aid: {e}")
         return False
+       
+def create_species_dict_from_fasta(input_fasta):
+    species_dict = {}
 
-def process_header(header, input_fasta, output_dir, failure_log, genomes_dir="./genomes"):
-    try:
-        # Extraer especie del header
-        match = re.search(r'_([A-Z][a-z]+_[a-z]+)$', header)
-        if not match:
-            print(f"{multiprocessing.current_process().name} - No se encontro especie en header: {header}")
-            return
+    with open(input_fasta, "r") as f:
+        for line_num, line in enumerate(f, start=1):
+            line = line.strip()
+            if line.startswith(">"):
+                # Extraer especie del header, ejemplo: Genus_species
+                match = re.search(r'([A-Z][a-z]+_[a-z]+)', line)
+                if match:
+                    species_name = match.group(1).replace("_", " ")
+                    species_dict.setdefault(species_name, []).append(line_num)
 
-        species = match.group(1).replace("_", " ")
-        print(f"{multiprocessing.current_process().name} - Especie detectada: {species}")
+    print(f"Se detectaron {len(species_dict)} especies unicas en {input_fasta}")
+    return species_dict
 
-        # Construcción de rutas
-        species_genome = species
-        
-        match_case = re.match(r'^>?([^#\s]+)', header)
-        nombre_caso = match_case.group(1) if match_case else re.sub(r'\W+', '_', header.strip())
-        
-        safe_name = species_genome.replace(" ", "_")
-        zip_file = os.path.abspath(os.path.join(genomes_dir, f"{safe_name}.zip"))
-        genome_dir = os.path.abspath(os.path.join(genomes_dir, f"{safe_name}_genome"))
+def process_species(species, positions, headers, input_fasta, output_dir, failure_log, genomes_dir="./genomes"):
 
-        # Crear subdirectorio de salida para la especie
-        species_output_dir = os.path.join(output_dir, nombre_caso)
-        os.makedirs(species_output_dir, exist_ok=True)
+    for position in positions:
+        try:
+            header = headers[(position - 1) // 2]
 
-        print(f"Genome_directory: {genomes_dir}")
-        print(f"Species: {species_genome}")
-        
-        if os.path.exists(pdf_nuevo):
-            print(f"{multiprocessing.current_process().name} - PDF ya existe: {pdf_nuevo}")
-            return
-            
-        # Descargar y procesar
-        if not download_genome(species_genome, zip_file, failure_log):
-            print(f"{multiprocessing.current_process().name} - Fallo en la descarga de {species_genome}")
-            return
+            match = re.search(r'([A-Z][a-z]+_[a-z]+)', header)
+            if not match:
+                print(f"No se encontro especie en header: {header}")
+                continue
 
-        if not unzip_genome(zip_file, genome_dir):
-            print(f"{multiprocessing.current_process().name} - Fallo al descomprimir {zip_file}")
-            return
+            species_name = match.group(1).replace("_", " ")
+            print(f"Especie detectada: {species_name}")
 
-        fna_path = find_fna_file(genome_dir, species_genome, failure_log)
-        if not fna_path:
-            print(f"{multiprocessing.current_process().name} - No se encontro archivo .fna para {species_genome}")
-            return
+            if species_name != species:
+                print(f"Especie del header no coincide con {species}")
+                continue
 
-        # Ejecutar TE-Aid en la carpeta de salida de la especie
-        run_extract_and_teaid(header, input_fasta, fna_path, species_output_dir)
-        
-        # Renombrar PDF generado por TE-Aid
-        pdf_original = os.path.join(species_output_dir, f"{nombre_caso}.fasta.c2g.pdf") 
-        pdf_nuevo = f"{species_output_dir}.pdf"
+            species_genome = species_name
+            match_case = re.match(r'^>?([^#\s]+)', header)
+            nombre_caso = match_case.group(1) if match_case else re.sub(r'\W+', '_', header.strip())
 
-        if os.path.exists(pdf_original):
-            os.rename(pdf_original, pdf_nuevo)
-            shutil.rmtree(species_output_dir)
-            print(f"PDF renombrado como: {pdf_nuevo}")
-            
-            # Eliminar genoma para liberar espacio
-            if os.path.exists(genome_dir) and os.path.exists(pdf_nuevo):
-                shutil.rmtree(genome_dir)
-                os.remove(zip_file)
-                print(f"Genoma {species_genome} eliminado para liberar espacio.")
-        else:
-            print(f"No se encontro el PDF esperado: {pdf_original}")
+            safe_name = species_genome.replace(" ", "_")
+            zip_file = os.path.abspath(os.path.join(genomes_dir, f"{safe_name}.zip"))
+            genome_dir = os.path.abspath(os.path.join(genomes_dir, f"{safe_name}_genome"))
+            species_output_dir = os.path.join(output_dir, nombre_caso)
+            os.makedirs(species_output_dir, exist_ok=True)
 
-    except Exception as e:
-        print(f"{multiprocessing.current_process().name} - ERROR procesando {header}: {e}")
+            pdf_nuevo = os.path.join(output_dir, f"{nombre_caso}.pdf")
+
+            print(f"Genome_directory: {genomes_dir}")
+            print(f"Species: {species_genome}")
+
+            if os.path.exists(pdf_nuevo):
+                print(f"PDF ya existe: {pdf_nuevo}")
+                continue
+
+            # Comprobar si existe el genoma
+            if os.path.exists(genome_dir):
+                print(f"Genoma ya descomprimido: {genome_dir}")
+            else:
+                if os.path.exists(zip_file):
+                    print(f"ZIP del genoma ya existe: {zip_file}")
+                else:
+                    print(f"Descargando genoma de {species_genome}...")
+                    if not download_genome(species_genome, zip_file, failure_log):
+                        print(f"Fallo en la descarga de {species_genome}")
+                        continue
+
+                # Descomprimir solo si falta la carpeta
+                print("Descomprimiendo genoma...")
+                if not unzip_genome(zip_file, genome_dir):
+                    print(f"Fallo al descomprimir {zip_file}")
+                    continue
+
+            # Buscar .fna
+            fna_path = find_fna_file(genome_dir, species_genome, failure_log)
+            if not fna_path:
+                print(f"No se encontro archivo .fna para {species_genome}")
+                return
+
+            # Ejecutar TE-Aid
+            run_extract_and_teaid(header, input_fasta, fna_path, species_output_dir)
+
+            pdf_original = os.path.join(species_output_dir, f"{nombre_caso}.fasta.c2g.pdf")
+
+            if os.path.exists(pdf_original):
+                os.rename(pdf_original, pdf_nuevo)
+                shutil.rmtree(species_output_dir)
+                print(f"PDF renombrado como: {pdf_nuevo}")
+            else:
+                print(f"No se encontro el PDF esperado: {pdf_original}")
+
+        except Exception as e:
+            print(f"ERROR procesando especie {species}: {e}")
+
+
+    # Limpieza final del genoma si todo fue bien
+    if genome_dir and os.path.exists(genome_dir) and pdf_nuevo and os.path.exists(pdf_nuevo):
+        shutil.rmtree(genome_dir)
+        if zip_file and os.path.exists(zip_file):
+            os.remove(zip_file)
+        print(f"Genoma {species_genome} eliminado para liberar espacio.")
 
 # Output
-def generation_multiprocessing(input_fasta, n_processes, output_dir, failure_log):
+def generation_multiprocessing(input_fasta, n_processes, output_dir, failure_log, genomes_dir="./genomes"):
     # Leer las cabeceras del archivo FASTA
     with open(input_fasta, "r") as fasta:
         headers = [line.strip() for line in fasta if line.startswith(">")]
 
     total = len(headers)
     print(f"Se encontraron {total} secuencias en {input_fasta}")
+    
+    species_dict = create_species_dict_from_fasta(input_fasta)
+    print(f"Se detectaron {len(species_dict)} especies en total.")
+    
+    print(f"{species_dict}")
 
     # Crear procesos
     processes = []
-    for i, header in enumerate(headers):
+    for species, positions in species_dict.items():
         p = multiprocessing.Process(
-            target=process_header,
-            args=(header, input_fasta, output_dir, failure_log)
+            target=process_species,
+            args=(species, positions, headers, input_fasta, output_dir, failure_log, genomes_dir)
         )
         processes.append(p)
 
     # Ejecutar procesos en batches de n_processes
     for i in range(0, len(processes), n_processes):
         batch = processes[i:i + n_processes]
+        
+        print(f"Iniciando batch {i // n_processes + 1} de {(len(processes) + n_processes - 1) // n_processes} "
+              f"({len(batch)} procesos en paralelo)...")
+
         for p in batch:
             p.start()
+
         for p in batch:
-            p.join()        
-                
+            p.join()
+
+        print(f"Batch {i // n_processes + 1} completado.\n")
+
+    print("Procesamiento completo.")       
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--input_fasta", required=True, help="Archivo FASTA de libreria")
-    parser.add_argument("--output_dir", required=True, help="Archivo FASTA de libreria")
+    parser.add_argument("--output_dir", required=True, help="Directorio de salida")
     parser.add_argument("--processes", type=int, default=20, help="Numero de procesos paralelos")
     parser.add_argument("--failure_log", default="descargas_fallidas.log", help="Archivo para guardar fallos")
     args = parser.parse_args()
@@ -260,5 +307,3 @@ if __name__ == "__main__":
         args.output_dir,
         args.failure_log
     )
-
-    
