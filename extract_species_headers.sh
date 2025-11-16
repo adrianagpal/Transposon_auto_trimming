@@ -12,9 +12,13 @@ if [ $# -ne 1 ]; then
 fi
 
 input_fasta=$1
-output_headers="headers.txt"
+output_headers="species.txt"
 
-# Extraer headers y eliminar \r
-grep ">" "$input_fasta" | sed 's/\r$//' > "$output_headers"
+# Extraer los headers, quedarnos con las dos últimas "palabras" separadas por "_",
+# y reemplazar "_" por espacio
+grep ">" "$input_fasta" \
+  | sed 's/\r$//' \
+  | awk -F'_' '{ print $(NF-1) " " $NF }' \
+  > "$output_headers"
 
 echo "Headers extraídos en: $output_headers"
