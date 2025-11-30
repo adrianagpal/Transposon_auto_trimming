@@ -10,9 +10,9 @@ def generate_string(length):
     return ''.join(random.choices(nucleotides, k=length))
 
 # formato FASTA
-def generate_simulated_data(case, sequences, total_length=20000):
+def generate_simulated_data(case, sequences, total_length=15000):
     min_length = 5000
-    filtered_sequences = [seq for seq in sequences if len(seq) > min_length]
+    filtered_sequences = [seq for seq in sequences if len(seq) < min_length]
 
     if case == 1:
         seq1_choice = random.choice(sequences)
@@ -36,27 +36,24 @@ def generate_simulated_data(case, sequences, total_length=20000):
 
     elif case == 2:
         if len(filtered_sequences) == 0:
-            raise ValueError("No hay secuencias con longitud >5000 para generar el caso 2")
-
-        len_obj = total_length // 3
+            raise ValueError("No hay secuencias con longitud <5000 para generar el caso 2")
 
         seq1_choice = random.choice(filtered_sequences)
-        seq1_species = " ".join(seq1_choice.description.split(" ")[1:]).replace(" ", "_")
         seq1_seq = str(seq1_choice.seq)
-
-        if len(seq1_seq) < len_obj:
-            sequence_1 = seq1_seq + generate_string(len_obj - len(seq1_seq))
-            len_obj = len(seq1_seq)
-        else:
-            sequence_1 = seq1_seq[:len_obj]
         
-        seq2_choice = random.choice(filtered_sequences)
-        seq2_seq = str(seq2_choice.seq)
+        min_starting_pos_2 = min(len(seq1_choice.seq), total_length // 2)
+        starting_pos_2 = random.randint(min_starting_pos_2, total_length // 2)
 
-        if len(seq2_seq) < len_obj:
-            sequence_2 = seq2_seq + generate_string(len_obj - len(seq2_seq))
-        else:
-            sequence_2 = seq2_seq[:len_obj]
+        sequence_1 = seq1_seq + generate_string(starting_pos_2 - len(seq1_seq))
+        
+        seq2_choice = random.choice(sequences)
+        seq2_species = " ".join(seq2_choice.description.split(" ")[1:]).replace(" ", "_")
+        seq2_seq = str(seq2_choice.seq)
+        
+        min_starting_pos_1 = min(starting_pos_2 + len(seq2_choice.seq), total_length)
+        starting_pos_1 = random.randint(min_starting_pos_1, total_length)
+        
+        sequence_2 = seq2_seq + generate_string(starting_pos_1 - len(seq2_seq))
 
         final_seq = sequence_1 + sequence_2 + sequence_1
 
@@ -64,7 +61,7 @@ def generate_simulated_data(case, sequences, total_length=20000):
             final_seq += generate_string(total_length - len(final_seq))
 
         final_seq = final_seq[:total_length]
-        return f">Caso{case}_{seq1_choice.id}_0_{len_obj}_{seq1_species}\n{final_seq}"
+        return f">Caso{case}_{seq2_choice.id}_{starting_pos_2}_{len(seq2_choice.seq)}_{seq2_species}\n{final_seq}"
 
     elif case == 3:
         monomer_length = random.randint(5, 100)
@@ -75,7 +72,7 @@ def generate_simulated_data(case, sequences, total_length=20000):
         sequence_str = str(random_sequence.seq)
         sequence_length = len(sequence_str)
         
-        start_pos = random.randint(int(total_length * 0.4), int(total_length * 0.6))
+        start_pos = random.randint(int(total_length * 0.2), int(total_length * 0.8))
         
         microsatelite = (monomer * (start_pos // monomer_length)) + monomer[:start_pos % monomer_length]           
         microsatelite += sequence_str
@@ -87,14 +84,19 @@ def generate_simulated_data(case, sequences, total_length=20000):
         return f">Caso{case}_{random_sequence.id}_{start_pos}_{sequence_length}_{seq_species}\n{microsatelite}"
 
     elif case == 4: 
-        if len(filtered_sequences) == 0:
-            raise ValueError("No hay secuencias con longitud >5000 para generar el caso 4")
         
-        sequence = random.choice(filtered_sequences)
+        starting_pos = random.randint(0, 3000)
+        ending_pos = random.randint(0, 3000)       
+        
+        sequence = random.choice(sequences)
         seq_species = " ".join(sequence.description.split(" ")[1:]).replace(" ", "_")
         seq4_seq = str(sequence.seq)
+        
+        final_seq = generate_string(starting_pos) + seq4_seq + generate_string(ending_pos)
+        
+        final_seq = final_seq[:total_length]
 
-        return f">Caso{case}_{sequence.id}_0_{len(seq4_seq)}_{seq_species}\n{seq4_seq}"
+        return f">Caso{case}_{sequence.id}_{starting_pos}_{len(seq4_seq)}_{seq_species}\n{seq4_seq}"
 
 # Output
 def generation_multiprocessing(sequences, n, output_file): 
