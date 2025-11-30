@@ -9,7 +9,6 @@ from functools import partial
 import shutil
 
 # Function that downloads a specific genome
-# It should work with MC_helper_agp/MCHelper envs
 def download_genome(species_genome, zip_file, failure_log):
     try:
         # First try with --reference
@@ -36,7 +35,6 @@ def download_genome(species_genome, zip_file, failure_log):
                 f.write(f"Error: Download not possible for {species_genome}\n")
             print(f"Error: Download not possible for {species_genome}. Registered in {failure_log}.")
             print(f"STDERR:\n{e.stderr}")
-            print("STDOUT:\n{e.stdout}")
             return False
 
     return True
@@ -167,6 +165,7 @@ def create_species_dict_from_fasta(input_fasta):
     print(f"Se detectaron {len(species_dict)} especies unicas en {input_fasta}")
     return species_dict
 
+
 def process_species(species, positions, headers, input_fasta, output_dir, failure_log, genomes_dir="./genomes"):
 
     for position in positions:
@@ -221,6 +220,7 @@ def process_species(species, positions, headers, input_fasta, output_dir, failur
                 if not unzip_genome(zip_file, genome_dir):
                     print(f"Fallo al descomprimir {zip_file}")
                     continue
+
 
             # Buscar .fna
             fna_path = find_fna_file(genome_dir, species_genome, failure_log)
@@ -290,6 +290,7 @@ def generation_multiprocessing(input_fasta, n_processes, output_dir, failure_log
         print(f"Batch {i // n_processes + 1} completado.\n")
 
     print("Procesamiento completo.")       
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
