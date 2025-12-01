@@ -63,11 +63,9 @@ def r2_score(y_true, y_pred):
 
 # === Argumentos con argparse ===
 parser = argparse.ArgumentParser(description="SmartInspection Prediction Script")
-parser.add_argument("mode", type=str, help="Execution mode (e.g. test)")
 parser.add_argument("model_path", type=str, help="Path to trained Keras model")
 parser.add_argument("scalerX_path", type=str, help="Path to saved scaler")
-parser.add_argument("dataX_path", type=str, help="Path to X_test .npy file")
-parser.add_argument("dataY_path", type=str, help="Path to Y_test .npy file")
+parser.add_argument("data_path", type=str, help="Path to X_test .npy file")
 args = parser.parse_args()
 
 def calcular_y_graficar_r23(real, predicted, nombre):
@@ -95,30 +93,39 @@ def calcular_y_graficar_r23(real, predicted, nombre):
 
     return r2
     
-def testing_models2(model_path, scalerx_path, dataX_path, dataY_path):
+def testing_models2(model_path, scalerx_path, data_path):
 
-    # === Load test data ===
-    X_test = np.load(dataX_path)
+    import pandas as pd
+    from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
+
+    # --- Cargar datos ---
+    X_test = np.load(os.path.join(data_path, "features_data.npy"))
     X_test = X_test / 255.0
-    X_test = X_test.astype(np.float32)
+    X_test = X_test.astype(np.float32)    
     
-    Y_test = np.load(dataY_path).astype(np.float32)
+    Y_test = np.load(os.path.join(data_path, "labels_data.npy")).astype(np.float32)
+    case_labels = np.load(os.path.join(data_path, "case_labels.npy"))
     
-    sample_names = np.array([f"Muestra_{i+1}" for i in range(len(Y_test))])
+    sample_names = np.arange(X_test.shape[0])
+    
+    unique_cases = np.unique(case_labels)
+    print(f"{unique_cases}")
+    metrics = {}
+
+    sample_names = np.arange(X_test.shape[0])
+    output_dir = "./results_cases"
+    os.makedirs(output_dir, exist_ok=True)
     
     print("X_test raw:", np.min(X_test), np.max(X_test))
     print("Y_test raw:", np.min(Y_test), np.max(Y_test))
-    
     print("X_test shape:", X_test.shape)
     print("Y_test shape:", Y_test.shape)
     print("NaNs in X_test:", np.isnan(X_test).sum())
     print("NaNs in Y_test:", np.isnan(Y_test).sum())
-
+    
     # === Load scaler ===
     scalerX = NDStandardScaler()
-    scalerX.load_model(scalerx_path, X_test)   # <-- solo la ruta
-
-    # === Apply scaling ===
+    scalerX.load_model(scalerx_path, X_test)
     X1_test_scl = scalerX.transform(X_test)
     
     print("NaNs in X1_test_scl after scaling:", np.isnan(X1_test_scl).sum())
@@ -135,46 +142,75 @@ def testing_models2(model_path, scalerx_path, dataX_path, dataY_path):
     # === Predict ===
     predictions = model.predict(
         [
-            X1_test_scl[:, :, :, :, 0],
-            X1_test_scl[:, :, :, :, 1],
-            X1_test_scl[:, :, :, :, 2],
-            X1_test_scl[:, :, :, :, 3]
+            X1_test_scl[:, :, :, 0],
+            X1_test_scl[:, :, :, 1],
+            X1_test_scl[:, :, :, 2],
+            X1_test_scl[:, :, :, 3]
         ],
         verbose=0
     )
-
     predictions = np.nan_to_num(predictions, nan=0)
-
+    
     print("NaNs in predictions:", np.isnan(predictions).sum())
     print("predictions shape:", predictions.shape)
+    
+    for case in unique_cases:
+    
+        idx = np.where(case_labels == case)[0]
+        print(f"{idx}")
+        y_true = Y_test[idx]
+        print(f"{y_true}")
+        y_pred = predictions[idx]
+        print(f"{y_pred}")
+    
+        mse = mean_squared_error(y_true, y_pred)
+        mae = mean_absolute_error(y_true, y_pred)
+        r2 = r2_score(y_true, y_pred)
+    
+        metrics[case] = {"MSE": mse, "MAE": mae, "R2": r2}
+        print(f"Case {case}: MSE={mse:.4f}, MAE={mae:.4f}, R2={r2:.4f}")
+    
+        # --- Scatter plot por caso ---
+        plt.figure(figsize=(6,6))
+    
+        # Output 0
+        plt.scatter(y_true[:, 0], y_pred[:, 0], alpha=0.6, color='blue', label='Output0')
+        # Output 1
+        plt.scatter(y_true[:, 1], y_pred[:, 1], alpha=0.6, color='green', marker='x', label='Output1')
+    
+        # Linea de referencia y=x
+        min_val = min(y_true.min(), y_pred.min())
+        max_val = max(y_true.max(), y_pred.max())
+        plt.plot([min_val, max_val], [min_val, max_val], color='red', linestyle='--', label='y=x')
+    
+        plt.title(f"Caso {case}")
+        plt.xlabel("Real")
+        plt.ylabel("Predicho")
+        plt.legend()
+        plt.grid(True)
+        plt.tight_layout()
+        plt.savefig(os.path.join(output_dir, f"scatter_case_{case}.png"))
+        plt.close()
+    
+        # --- Calcular R2 por posicion ---
+        r2_initial = calcular_y_graficar_r23(Y_test[idx, 0], predictions[idx, 0], f"StartingPos_{case}")
+        r2_final = calcular_y_graficar_r23(Y_test[idx, 1], predictions[idx, 1], f"EndingPos_{case}")
+    
+        print(f"R2 starting position_{case}: {r2_initial:.4f}")
+        print(f"R2 ending position_{case}: {r2_final:.4f}")
 
-    r2_initial = calcular_y_graficar_r23(Y_test[:, 0], predictions[:, 0], "StartingPos")
-    r2_final = calcular_y_graficar_r23(Y_test[:, 1], predictions[:, 1], "EndingPos")
-
-    print("R2 starting position:", r2_initial)
-    print("R2 ending position:", r2_final)
-
-    # === Metrics ===
-    metrics = {}
-    for i in range(Y_test.shape[1]):
-        mse = mean_squared_error(Y_test[:, i], predictions[:, i])
-        mae = mean_absolute_error(Y_test[:, i], predictions[:, i])
-        r2 = r2_sklearn(Y_test[:, i], predictions[:, i])
-        metrics[f"Output_{i}"] = {"MSE": mse, "MAE": mae, "R2": r2}
-        print(f"Output_{i} -> MSE: {mse:.4f}, MAE: {mae:.4f}, R2: {r2:.4f}")
-
-    # === Save predictions ===
     df = pd.DataFrame({
-        "Sample": sample_names,
-        **{f"Real_Output{i}": Y_test[:, i] for i in range(Y_test.shape[1])},
-        **{f"Pred_Output{i}": predictions[:, i] for i in range(Y_test.shape[1])}
+    "Sample": sample_names,
+    **{f"Real_Output{i}": Y_test[:, i] for i in range(Y_test.shape[1])},
+    **{f"Pred_Output{i}": predictions[:, i] for i in range(predictions.shape[1])}
     })
-    df.to_csv("predicciones_metrics.csv", index=False)
+    df.to_csv(os.path.join(output_dir, "predicciones_metrics.csv"), index=False)
 
+    # === Guardar resumen de metricas ===
     metrics_df = pd.DataFrame(metrics).T
-    metrics_df.to_csv("metrics_summary.csv", index=True)
+    metrics_df.to_csv(os.path.join(output_dir, "metrics_summary.csv"), index=True)
 
-    print("\nPredicciones guardadas en 'predicciones_metrics.csv'")
-    print("Resumen de metricas guardado en 'metrics_summary.csv'")
-      
-testing_models2(args.model_path, args.scalerX_path, args.dataX_path, args.dataY_path)
+    print(f"\nPredicciones guardadas en '{os.path.join(output_dir, 'predicciones_metrics.csv')}'")
+    print(f"Resumen de metricas guardado en '{os.path.join(output_dir, 'metrics_summary.csv')}'")
+
+testing_models2(args.model_path, args.scalerX_path, args.data_path)
