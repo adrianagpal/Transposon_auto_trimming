@@ -1,25 +1,30 @@
 # -*- coding: utf-8 -*-
-from tensorflow.keras import layers
+import os
+os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+os.environ["TF_GPU_ALLOCATOR"] = "default"
 import tensorflow as tf
+from tensorflow.keras import layers
 from tensorflow.keras import backend as K
 from tensorflow.keras.utils import plot_model
+from tensorflow.keras.callbacks import EarlyStopping
+
 from sklearn.metrics import confusion_matrix, accuracy_score, f1_score, recall_score, precision_score, \
     classification_report
 from sklearn.model_selection import train_test_split
+from sklearn.base import TransformerMixin
+from sklearn.preprocessing import StandardScaler
+
 from pickle import dump, load
 import pandas as pd
 import matplotlib.pyplot as plt
 from Bio import SeqIO
 import numpy as np
+import re
 #from pdf2image import convert_from_path
 #from pdf2image.exceptions import PDFPageCountError
 import cv2
 from focal_loss import BinaryFocalLoss
-import os
 import sys
-from sklearn.base import TransformerMixin
-from sklearn.preprocessing import StandardScaler
-from tensorflow.keras.callbacks import EarlyStopping
 from tensorflow.compat.v1 import ConfigProto
 from tensorflow.compat.v1 import InteractiveSession
 from sklearn.metrics import r2_score
@@ -200,7 +205,7 @@ def write_sequences_file(sequences, filename):
         sys.exit(0)
 
 # Crea un dataset en matrices numpy a partir de la lista de TEs y de sus plots
-# Tambien genera una matriz con las etiquetas con la información de posiciones de inicio y final
+# Tambien genera una matriz con las etiquetas con la informaci�n de posiciones de inicio y final
 # Esto se hace para poder predecir estas posiciones a partir de la informacion de los plots
 
 def count_good_pdfs(MCH_out):
@@ -213,7 +218,7 @@ def count_good_pdfs(MCH_out):
     for pdf_file in pdf_files:
         pdf_path = os.path.join(pdf_dir, pdf_file)
         try:
-            # Verifica tamaño > 4 KB
+            # Verifica tama�o > 4 KB
             if os.path.getsize(pdf_path) <= 4 * 1024:
                 count_bad += 1
                 continue
@@ -237,18 +242,26 @@ def create_dataset(library, MCH_out, outputDir):
     good_pdfs, bad_pdfs = count_good_pdfs(MCH_out)
     
     # Para cada secuencia TE, crea una matriz
-    feature_data1 = np.zeros((good_pdfs, 256, 256, 3, 4), dtype=np.int16)
+    feature_data1 = np.zeros((good_pdfs, 256, 256, 4), dtype=np.uint8)
     # Crea una matriz para almacenar las categorias como etiquetas
-    labels = np.zeros((good_pdfs, 2))
+    labels = np.zeros((good_pdfs, 2), dtype=np.float32)
+    case_names = []
+    species_names = []
     
     print(good_pdfs, bad_pdfs)
 
     n = 0
     for TE in TEs:
+
         print("Doing: " + TE.id)
         TE_name = TE.id.split("#")[0]
+        case_id = TE.id.split("_")[0]
+        species_match = re.search(r'([A-Z][a-z]+_[a-z]+)$', TE.id)
+        species_name = species_match.group(0) if species_match else None
+            
         print(f"Doing: {TE_name}")
         try:
+
             pdf_path = MCH_out + '/te_aid/' + TE_name + '.pdf'
             
             if os.path.getsize(pdf_path) <= 4 * 1024:
@@ -264,39 +277,44 @@ def create_dataset(library, MCH_out, outputDir):
 
             # Carga la imagen desde el archivo
             te_aid_image = cv2.imread(MCH_out + '/te_aid/' + TE_name + '.fa.c2g.jpeg')
+            te_aid_image = cv2.cvtColor(te_aid_image, cv2.COLOR_BGR2GRAY)
             
             if te_aid_image is None:
                 print("ERROR: No se pudo abrir la imagen de", TE_name)
                 continue  # pasa al siguiente TE
                 
-            h, w, c = te_aid_image.shape
-            print(f"{TE_name}: h={h}, w={w}, c={c}")
+            h, w = te_aid_image.shape
+            print(f"{TE_name}: h={h}, w={w}")
 
             # Divide la imagen en distintos plots y les hace resize
-            divergence_plot = cv2.resize(te_aid_image[150:1030, 150:1130, :], (256, 256))
-            coverage_plot = cv2.resize(te_aid_image[150:1030, 1340:2320, :], (256, 256))
-            selfdot_plot = cv2.resize(te_aid_image[1340:2220, 150:1130, :], (256, 256))
-            structure_plot = cv2.resize(te_aid_image[1340:2220, 1340:2320, :], (256, 256))
-
+            divergence_plot = cv2.resize(te_aid_image[150:1030, 150:1130], (256, 256))
+            coverage_plot = cv2.resize(te_aid_image[150:1030, 1340:2320], (256, 256))
+            selfdot_plot = cv2.resize(te_aid_image[1340:2220, 150:1130], (256, 256))
+            structure_plot = cv2.resize(te_aid_image[1340:2220, 1340:2320], (256, 256))
+            
             """plt.xticks([]), plt.yticks([])
             plt.imshow(structure_plot, cmap='gray', interpolation='bicubic')
             plt.show()"""
 
             # Guarda la informacion de los plots en la matriz feature_data1
-            feature_data1[n, :, :, :, 0] = divergence_plot
-            feature_data1[n, :, :, :, 1] = coverage_plot
-            feature_data1[n, :, :, :, 2] = selfdot_plot
-            feature_data1[n, :, :, :, 3] = structure_plot
+            feature_data1[n, :, :, 0] = divergence_plot
+            feature_data1[n, :, :, 1] = coverage_plot
+            feature_data1[n, :, :, 2] = selfdot_plot
+            feature_data1[n, :, :, 3] = structure_plot
 
-            # Guarda el penultimo valor del TE.id (posición de inicio)
+            # Guarda el penultimo valor del TE.id (posici�n de inicio)
             start_pos = int(TE.id.split("_")[-4])
 
             # Guarda el ultimo valor del TE.id (longitud del TE)
             TE_len = int(TE.id.split("_")[-3])
 
             # Guarda en las etiquetas la posicion de inicio y la de final, relativa a la longitud total
-            labels[n, 0] = start_pos / 20000
-            labels[n, 1] = (start_pos + TE_len) / 20000
+            labels[n, 0] = start_pos / 15000
+            labels[n, 1] = (start_pos + TE_len) / 15000
+            
+            case_names.append(case_id)
+            species_names.append(species_name)
+            
             n += 1
         except Exception as ex:
             print("something wrong with " + TE_name)
@@ -304,8 +322,8 @@ def create_dataset(library, MCH_out, outputDir):
 
     np.save(outputDir + "/features_data.npy", feature_data1)
     np.save(outputDir + "/labels_data.npy", labels)
-
-
+    np.save(outputDir + "/case_labels.npy", np.array(case_names))
+    np.save(outputDir + "/species_labels.npy", np.array(species_names))
 # Creamos un modelo por cada rama para procesar tipos distintos de features (como divergence, coverage, etc.)
 # Despues se generara un modelo completo que agrupe a todas las branches CNN
 def cnn_branch(dim1, dim2, dim3, i):
@@ -321,7 +339,7 @@ def cnn_branch(dim1, dim2, dim3, i):
                                     bias_regularizer=tf.keras.regularizers.l1_l2(0.0001, 0.001), use_bias=True,
                                     padding="same", name="conv_" + str(i) + "_1")(inputs)
     layers = tf.keras.layers.Dropout(0.2, name="dropout_2d_" + str(i) + "_1")(layers)
-    layers = tf.keras.layers.BatchNormalization(axis=1, momentum=0.8, epsilon=0.001, scale=False,
+    layers = tf.keras.layers.BatchNormalization(axis=-1, momentum=0.8, epsilon=0.001, scale=False,
                                                 name="BN_" + str(i) + "_1")(layers)
     layers = tf.keras.layers.MaxPooling2D(pool_size=(4, 4), strides=None, name="max_pool_" + str(i) + "_1")(layers)
 
@@ -332,7 +350,7 @@ def cnn_branch(dim1, dim2, dim3, i):
                                     bias_regularizer=tf.keras.regularizers.l1_l2(0.0001, 0.001), use_bias=True,
                                     padding="same", name="conv_" + str(i) + "_2")(layers)
     layers = tf.keras.layers.Dropout(0.2, name="dropout_2d_" + str(i) + "_2")(layers)
-    layers = tf.keras.layers.BatchNormalization(axis=1, momentum=0.4, epsilon=0.001, scale=False,
+    layers = tf.keras.layers.BatchNormalization(axis=-1, momentum=0.4, epsilon=0.001, scale=False,
                                                 name="BN_" + str(i) + "_2")(layers)
     layers = tf.keras.layers.MaxPooling2D(pool_size=(4, 4), strides=None, name="max_pool_" + str(i) + "_2")(layers)
 
@@ -343,7 +361,7 @@ def cnn_branch(dim1, dim2, dim3, i):
                                     bias_regularizer=tf.keras.regularizers.l1_l2(0.0001, 0.001), use_bias=True,
                                     padding="same", name="conv_" + str(i) + "_3")(layers)
     layers = tf.keras.layers.Dropout(0.2, name="dropout_2d_" + str(i) + "_3")(layers)
-    layers = tf.keras.layers.BatchNormalization(axis=1, momentum=0.2, epsilon=0.001, scale=False,
+    layers = tf.keras.layers.BatchNormalization(axis=-1, momentum=0.2, epsilon=0.001, scale=False,
                                                 name="BN_" + str(i) + "_3")(layers)
     layers = tf.keras.layers.MaxPooling2D(pool_size=(4, 4), strides=None, name="max_pool_" + str(i) + "_3")(layers)
 
@@ -354,7 +372,7 @@ def cnn_branch(dim1, dim2, dim3, i):
                                     bias_regularizer=tf.keras.regularizers.l1_l2(0.0001, 0.001), use_bias=True,
                                     padding="same", name="conv_" + str(i) + "_4")(layers)
     layers = tf.keras.layers.Dropout(0.2, name="dropout_2d_" + str(i) + "_4")(layers)
-    layers = tf.keras.layers.BatchNormalization(axis=1, momentum=0.2, epsilon=0.001, scale=False,
+    layers = tf.keras.layers.BatchNormalization(axis=-1, momentum=0.2, epsilon=0.001, scale=False,
                                                 name="BN_" + str(i) + "_4")(layers)
     layers = tf.keras.layers.MaxPooling2D(pool_size=(4, 4), strides=None, name="max_pool_" + str(i) + "_4")(layers)
 
@@ -574,7 +592,7 @@ if __name__ == '__main__':
             # std = np.std(x, axis=0)
             # x = (x - mean) / std
             x = x.astype(np.float16)
-            print(x[0, :, 0, 0, 1])
+            print(x.shape)
             y = np.load(Y_str)
             # y = y[:, 0]
             # print(y.shape)
@@ -656,30 +674,26 @@ if __name__ == '__main__':
             val_loss = history.history['val_loss']
             np.save('val_los_SENMAP_completeDBnpy', val_loss)
 
-            plt.plot(history.history['val_r2_score'])
-            plt.plot(history.history['r2_score'])
-            plt.legend(['val_r2_score', 'train_r2_score'], loc='upper right')
-            plt.xlabel('Epoch')
-            plt.ylabel('r2_score')
-            plt.title('Epoch vs r2_score')
-            plt.savefig('Train_Curve.png', bbox_inches='tight', dpi=500)
-
-            plt.plot(history.history['val_loss'])
-            plt.plot(history.history['loss'])
-            plt.legend(['val_loss', 'train_loss'], loc='upper right')
-            plt.xlabel('Epoch')
-            plt.ylabel('loss')
-            plt.title('Epoch vs Loss')
-
+            # === Plot R2 ===
             plt.figure()
-            plt.plot(history.history['val_loss'])
-            plt.plot(history.history['loss'])
-            plt.legend(['val_loss', 'train_loss'], loc='lower right')
+            plt.plot(history.history['r2_score'])
+            plt.plot(history.history['val_r2_score'])
+            plt.legend(['train_r2_score', 'val_r2_score'], loc='lower right')
             plt.xlabel('Epoch')
-            plt.ylabel('loss')
-            plt.title('Epoch vs loss')
-            plt.savefig('Train_Curve_los.png', bbox_inches='tight', dpi=500)
-
+            plt.ylabel('R2 Score')
+            plt.title('Epoch vs R2 Score')
+            plt.savefig('Train_Curve_R2.png', bbox_inches='tight', dpi=500)
+                       
+            # === Plot Loss (MSE) ===
+            plt.figure()
+            plt.plot(history.history['loss'])
+            plt.plot(history.history['val_loss'])
+            plt.legend(['train_loss', 'val_loss'], loc='upper right')
+            plt.xlabel('Epoch')
+            plt.ylabel('Loss (MSE)')
+            plt.title('Epoch vs Loss')
+            plt.savefig('Train_Curve_Loss_bottom.png', bbox_inches='tight', dpi=500)
+            
             model.save('trained_model.h5')
             np.save("X_test.npy", X_test)
             np.save("Y_test.npy", Y_test)
