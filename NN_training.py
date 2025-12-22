@@ -2,6 +2,7 @@
 import os
 os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 os.environ["TF_GPU_ALLOCATOR"] = "default"
+
 import tensorflow as tf
 from tensorflow.keras import layers
 from tensorflow.keras import backend as K
@@ -253,17 +254,25 @@ def create_dataset(library, MCH_out, outputDir):
     n = 0
     for TE in TEs:
 
-        print("Doing: " + TE.id)
+        print("Doing TE.id: " + TE.id)
         TE_name = TE.id.split("#")[0]
+        
+        print("Doing TE_name: " + TE.id)
         case_id = TE.id.split("_")[0]
+        
+        print("Doing case_id: " + TE.id)
         species_match = re.search(r'([A-Z][a-z]+_[a-z]+)$', TE.id)
         species_name = species_match.group(0) if species_match else None
             
-        print(f"Doing: {TE_name}")
+        print(f"Doing TE_name: {TE_name}")
         try:
 
             pdf_path = MCH_out + '/te_aid/' + TE_name + '.pdf'
             
+            if not os.path.exists(pdf_path):
+                print(f"PDF no encontrado para {TE_name}, se omite.")
+                continue
+    
             if os.path.getsize(pdf_path) <= 4 * 1024:
                 continue
                 
@@ -304,17 +313,28 @@ def create_dataset(library, MCH_out, outputDir):
 
             # Guarda el penultimo valor del TE.id (posici�n de inicio)
             start_pos = int(TE.id.split("_")[-4])
+            print(f"start_pos: {start_pos}")
 
             # Guarda el ultimo valor del TE.id (longitud del TE)
             TE_len = int(TE.id.split("_")[-3])
+            
+            print(f"TE_len: {TE_len}")
 
             # Guarda en las etiquetas la posicion de inicio y la de final, relativa a la longitud total
             labels[n, 0] = start_pos / 15000
-            labels[n, 1] = (start_pos + TE_len) / 15000
+            
+            end_pos = start_pos + TE_len
+            
+            if end_pos > 15000:
+                labels[n, 1] = 1
+                
+            else:
+                labels[n, 1] = end_pos / 15000
             
             case_names.append(case_id)
             species_names.append(species_name)
             
+            print(f"n: {n}")
             n += 1
         except Exception as ex:
             print("something wrong with " + TE_name)
@@ -324,6 +344,7 @@ def create_dataset(library, MCH_out, outputDir):
     np.save(outputDir + "/labels_data.npy", labels)
     np.save(outputDir + "/case_labels.npy", np.array(case_names))
     np.save(outputDir + "/species_labels.npy", np.array(species_names))
+
 # Creamos un modelo por cada rama para procesar tipos distintos de features (como divergence, coverage, etc.)
 # Despues se generara un modelo completo que agrupe a todas las branches CNN
 def cnn_branch(dim1, dim2, dim3, i):
@@ -465,8 +486,8 @@ def testing_models2(model_path, scalerx_path, dataX_path, dataY_path):
                                                        'r2_score': r2_score})
 
     predictions = model.predict(
-        [X1_test_scl[:, :, :, :, 0], X1_test_scl[:, :, :, :, 1], X1_test_scl[:, :, :, :, 2],
-         X1_test_scl[:, :, :, :, 3]], verbose=0)
+        [X1_test_scl[:, :, :, 0], X1_test_scl[:, :, :, 1], X1_test_scl[:, :, :, 2],
+         X1_test_scl[:, :, :, 3]], verbose=0)
 
     predictions = np.nan_to_num(predictions, nan=0)
 
@@ -512,11 +533,16 @@ def run_experiment(model, X_train, Y_train, X_dev, Y_dev, batch_size, num_epochs
     if np.isnan(X_train).any() or np.isnan(Y_train).any() or np.isnan(X_dev).any() or np.isnan(Y_dev).any():
         print("hay valores nan")
         return None, None
+        
+    # Crear carpeta "checkpoint" si no existe
+    checkpoint_dir = "./checkpoint"
+    os.makedirs(checkpoint_dir, exist_ok=True)
+    
+    checkpoint_filepath = os.path.join(checkpoint_dir, "model.weights.h5")
 
     # Define el callback ReduceLROnPlateau
     # Reduce la tasa de aprendizaje si el val_loss no mejora durante 10 epocas
     lr_scheduler = tf.keras.callbacks.ReduceLROnPlateau(monitor='val_loss', factor=0.01, patience=10, verbose=1)
-    checkpoint_filepath = "./checkpoint/model.weights.h5"
 
     # Guarda los pesos del modelo con mejor val_r2_score
     checkpoint_callback = tf.keras.callbacks.ModelCheckpoint(
@@ -567,104 +593,77 @@ if __name__ == '__main__':
             weight_decay = 0.0001
             batch_size = 16
             num_epochs = 200
-            """image_size = (1, 27)  # We'll resize input images to this size
-            patch_size = 1  # Size of the patches to be extract from the input images
-            num_patches = 27
-            projection_dim = 8
-            num_heads = 16
-            transformer_units = [
-                projection_dim * 2,
-                projection_dim,
-            ]  # Size of the transformer layers
-            print(transformer_units)
-            transformer_layers = 4
-            mlp_head_units = [2048, 1024, 512, 256]  # Size of the dense layers of the final classifier"""
 
             x_str = sys.argv[2]
             Y_str = sys.argv[3]
 
-            # for debugging only
-            # tf.config.run_functions_eagerly(True)
-
-            x = np.load(x_str)
-            x = x / 255.0
-            # mean = np.mean(x, axis=0)
-            # std = np.std(x, axis=0)
-            # x = (x - mean) / std
+            # Load data
+            x = np.load(x_str) / 255.0
             x = x.astype(np.float16)
-            print(x.shape)
+            print(f"Loaded X: {x.shape}")
             y = np.load(Y_str)
-            # y = y[:, 0]
-            # print(y.shape)
-            # print(y)
+            print(f"Loaded Y: {y.shape}")
 
-            # normalizar cada imagen individualmente
-            # for i in range(len(x)):
-            # mean = np.mean(x[i])
-            # std = np.std(x[i])
-            # x[i] = (x[i] - mean) / std
-            # x = x.astype(np.float32) / 255.0
-
-            # normalizacion min-max
-            # from sklearn.preprocessing import MinMaxScaler
-            # num_batches = len(x) // batch_size
-            # scaler = MinMaxScaler()
-            # for i in range(num_batches):
-            #    start_idx = i * batch_size
-            #    end_idx = (i + 1) * batch_size
-            #    batch_x = x[start_idx:end_idx]
-            #    x[start_idx:end_idx] = scaler.fit_transform(batch_x.reshape(-1, batch_x.shape[-1])).reshape(batch_x.shape)
-            # x = scaler.fit_transform(x.reshape(-1, x.shape[-1])).reshape(x.shape)
-
-            # imputacion valores nulos
-            # from sklearn.impute import SimpleImputer
-            # imputer = SimpleImputer(strategy='mean')
-            # x = imputer.fit_transform(x)
-
+            # Split en train/dev/test
             validation_size = 0.2
             seed = 7
             X_train, X_test_dev, Y_train, Y_test_dev = train_test_split(x, y, test_size=validation_size,
                                                                         random_state=seed)
             X_dev, X_test, Y_dev, Y_test = train_test_split(X_test_dev, Y_test_dev, test_size=0.5, random_state=seed)
-
+            
+            # Scaler normalization
             scalerX = NDStandardScaler().fit(X_train)
             X_train = scalerX.transform(X_train)
             X_dev = scalerX.transform(X_dev)
             X_test = scalerX.transform(X_test)
 
             scalerX.save_model("scalerX")
-
+            
+            # Información de los datasets
             print("Information about the data")
-            print("Training shape: X=" + str(X_train.shape) + ", Y=" + str(Y_train.shape) + ", Positive=" + str(
-                Y_train[Y_train == 0].shape[0]) + " (" + str(Y_train[Y_train == 0].shape[0] / Y_train.shape[0]) + ")")
-            print("Dev shape: X=" + str(X_dev.shape) + ", Y=" + str(Y_dev.shape) + ", Positive=" + str(
-                Y_dev[Y_dev == 0].shape[0]) + " (" + str(Y_dev[Y_dev == 0].shape[0] / Y_dev.shape[0]) + ")")
-            print("Test shape: X=" + str(X_test.shape) + ", Y=" + str(Y_test.shape) + ", Positive=" + str(
-                Y_test[Y_test == 0].shape[0]) + " (" + str(Y_test[Y_test == 0].shape[0] / Y_test.shape[0]) + ")")
+            print(f"Training shape: X={X_train.shape}, Y={Y_train.shape}")
+            print(f"Dev shape: X={X_dev.shape}, Y={Y_dev.shape}")
+            print(f"Test shape: X={X_test.shape}, Y={Y_test.shape}")
 
-            # generate the NNs
-            cnn_div = cnn_branch(X_train.shape[1], X_train.shape[2], X_train.shape[3], 1)
-            cnn_cov = cnn_branch(X_train.shape[1], X_train.shape[2], X_train.shape[3], 2)
-            cnn_dot = cnn_branch(X_train.shape[1], X_train.shape[2], X_train.shape[3], 3)
-            cnn_str = cnn_branch(X_train.shape[1], X_train.shape[2], X_train.shape[3], 4)
+            # Generate the NNs
+            cnn_div = cnn_branch(X_train.shape[1], X_train.shape[2], 1, 1)
+            cnn_cov = cnn_branch(X_train.shape[1], X_train.shape[2], 1, 2)
+            cnn_dot = cnn_branch(X_train.shape[1], X_train.shape[2], 1, 3)
+            cnn_str = cnn_branch(X_train.shape[1], X_train.shape[2], 1, 4)
+            
+            # Final model
             model = auto_trimming(cnn_div, cnn_cov, cnn_dot, cnn_str)
-            # summarize layers
             print(model.summary())
             #tf.keras.utils.plot_model(model, to_file='model_plot.png', show_shapes=True, show_layer_names=True)
 
+            # Separate channels
             path_log_base = os.path.dirname(os.path.realpath(__file__))
-            training_set = [X_train[:, :, :, :, 0], X_train[:, :, :, :, 1], X_train[:, :, :, :, 2],
-                            X_train[:, :, :, :, 3]]
-            dev_set = [X_dev[:, :, :, :, 0], X_dev[:, :, :, :, 1], X_dev[:, :, :, :, 2], X_dev[:, :, :, :, 3]]
-            test_set = [X_test[:, :, :, :, 0], X_test[:, :, :, :, 1], X_test[:, :, :, :, 2], X_test[:, :, :, :, 3]]
+            
+            training_set = [
+                X_train[:, :, :, 0:1], 
+                X_train[:, :, :, 1:2], 
+                X_train[:, :, :, 2:3],
+                X_train[:, :, :, 3:4]
+            ]
+            
+            dev_set = [
+                X_dev[:, :, :, 0:1], 
+                X_dev[:, :, :, 1:2], 
+                X_dev[:, :, :, 2:3], 
+                X_dev[:, :, :, 3:4]
+            ]
+            
+            test_set = [
+                X_test[:, :, :, 0:1], 
+                X_test[:, :, :, 1:2], 
+                X_test[:, :, :, 2:3], 
+                X_test[:, :, :, 3:4]
+            ]
 
-            history, checkpoints = run_experiment(model, training_set, Y_train, dev_set, Y_dev, batch_size, num_epochs)
+            # Run training
+            history, checkpoints = run_experiment(
+                model, training_set, Y_train, dev_set, Y_dev, batch_size, num_epochs)
 
-            # outputs from each CNN branch
-            # print(cnn_div.output.numpy())
-            # print(cnn_cov.output.numpy())
-            # print(cnn_dot.output.numpy())
-            # print(cnn_str.output.numpy())
             acc = history.history['r2_score']
             np.save('accuracy_SENMAP_completeDB.npy', acc)
             val_acc = history.history['val_r2_score']
