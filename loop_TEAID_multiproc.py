@@ -10,7 +10,7 @@ import shutil
 from Bio import SeqIO
 
 # Function that downloads a specific genome
-def download_genome(species_genome, zip_file, failure_log, env_name="MC_helper_agp"):
+def download_genome(species_genome, zip_file, env_name="MC_helper_agp"):
     try:
         # First try with --reference
         print(f"Trying downloading {species_genome} with --reference...")
@@ -72,7 +72,7 @@ def unzip_genome(zip_file, genome_dir):
         return False
 
 # Function that saves the path of the .fna genome file
-def find_fna_file(genome_dir, species_name, failure_log):
+def find_fna_file(genome_dir, species_name):
 
     fna_file = None
 
@@ -153,12 +153,14 @@ def create_species_dict_from_fasta(input_fasta):
     print(f"Se detectaron {len(species_dict)} especies unicas en {input_fasta}")
     return species_dict
 
-def process_species(species, sequences, positions, headers, input_fasta, output_dir, failure_log, genomes_dir, env_name="MC_helper_agp"):
+def process_species(species, sequences, positions, headers, input_fasta, output_dir="./te-aid", genomes_dir="./genomes", env_name="MC_helper_agp"):
+
+    os.makedirs(genomes_dir, exist_ok=True)
 
     print(f"Especie detectada: {species}")
     species_safe = species.replace("_", " ")
     genome_dir = os.path.abspath(os.path.join(genomes_dir, f"{species}_genome"))
-    zip_file = os.path.abspath(os.path.join(genomes_dir, f"{species}.zip"))
+    zip_file = os.path.abspath(os.path.join(genomes_dir, f"{species}.zip"))   
 
     for position in positions:
         try:
@@ -181,15 +183,16 @@ def process_species(species, sequences, positions, headers, input_fasta, output_
             # Check if pdf exists
             if os.path.exists(new_pdf):
                 print(f"PDF ya existe: {new_pdf}")
+                shutil.rmtree(case_dir)
                 continue
 
             if not os.path.exists(zip_file):
-                download_genome(species_safe, zip_file, failure_log)
+                download_genome(species_safe, zip_file)
             
             if not os.path.exists(genome_dir):
                 unzip_genome(zip_file, genome_dir)
 
-            fna_file = find_fna_file(genome_dir, species, failure_log)
+            fna_file = find_fna_file(genome_dir, species)
             if not fna_file:
                 print(f"No se encontro archivo .fna para {species}")
                 continue
@@ -216,7 +219,7 @@ def process_species(species, sequences, positions, headers, input_fasta, output_
             os.remove(zip_file)
         print(f"Genoma {species} eliminado para liberar espacio.")
 
-def generation_multiprocessing(input_fasta, n_processes, output_dir, failure_log, genomes_dir="./genomes"):
+def generation_multiprocessing(input_fasta, n_processes, output_dir, genomes_dir="./genomes"):
 
     os.makedirs(genomes_dir, exist_ok=True)
     
@@ -237,7 +240,7 @@ def generation_multiprocessing(input_fasta, n_processes, output_dir, failure_log
     for species, positions in species_dict.items():
         p = multiprocessing.Process(
             target=process_species,
-            args=(species, sequences, positions, headers, input_fasta, output_dir, failure_log, genomes_dir)
+            args=(species, sequences, positions, headers, input_fasta, output_dir, genomes_dir)
         )
         processes.append(p)
 
@@ -256,14 +259,13 @@ def generation_multiprocessing(input_fasta, n_processes, output_dir, failure_log
 
         print(f"Batch {i // n_processes + 1} completado.\n")
 
-    print("Procesamiento completo.")       
+    print("Procesamiento completo.")     
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--input_fasta", required=True, help="Archivo FASTA de libreria")
     parser.add_argument("--processes", type=int, default=20, help="Numero de procesos paralelos")
     parser.add_argument("--output_dir", default="te-aid", help="Directorio de salida")
-    parser.add_argument("--failure_log", default="descargas_fallidas.log", help="Archivo para guardar fallos")
     args = parser.parse_args()
 
     os.makedirs(args.output_dir, exist_ok=True)
@@ -272,7 +274,6 @@ if __name__ == "__main__":
         args.input_fasta,
         args.processes,
         args.output_dir,
-        args.failure_log
     )
     
     db_dir = os.path.abspath("db")
