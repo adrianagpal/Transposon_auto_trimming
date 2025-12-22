@@ -1,8 +1,8 @@
 from Bio import SeqIO
 import re, os, subprocess, zipfile, multiprocessing, sys, shutil
 import argparse
-from autotrim import generation_multiprocessing, create_dataset
-from model import ResNet18, auto_trimming, NDStandardScaler, testing_model
+from dataset_library import generation_multiprocessing, create_dataset
+from model_library import ResNet18, auto_trimming, NDStandardScaler, testing_model
 import numpy as np
 from sklearn.model_selection import train_test_split
 import tensorflow as tf
