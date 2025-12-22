@@ -9,6 +9,7 @@ from functools import partial
 import shutil
 
 # Function that downloads a specific genome
+# It should work with MC_helper_agp/MCHelper envs
 def download_genome(species_genome, zip_file, failure_log):
     try:
         # First try with --reference
@@ -129,7 +130,7 @@ def run_extract_and_teaid(header, input_fasta, fna_file, output_base_dir, env_na
     print(f"Ejecutando TE-Aid con {te_fasta} y {fna_file}...")
     try:
         result = subprocess.run(
-            f"source ~/anaconda3/etc/profile.d/conda.sh && conda activate {env_name} && ./TE-Aid -q {os.path.abspath(te_fasta)} -g {os.path.abspath(fna_file)} -o {os.path.abspath(case_dir)}",
+            f"source ~/anaconda3/etc/profile.d/conda.sh && conda activate agp_gpu && ./TE-Aid -q {os.path.abspath(te_fasta)} -g {os.path.abspath(fna_file)} -o {os.path.abspath(case_dir)}",
             shell=True,
             capture_output=True,
             text=True,
