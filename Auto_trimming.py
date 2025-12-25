@@ -1,32 +1,31 @@
-from Bio import SeqIO
-import re, os, subprocess, zipfile, multiprocessing, sys, shutil
+import os, subprocess
 import argparse
-from dataset_library import generation_multiprocessing, create_dataset
-from model_library import ResNet18, auto_trimming, NDStandardScaler, testing_model
+from dataset_library import generation_multiprocessing
+from model_library import ResNet18, auto_trimming, NDStandardScaler, testing_model, plot_training_metrics, test_model
 import numpy as np
 from sklearn.model_selection import train_test_split
 import tensorflow as tf
 from tensorflow.keras.callbacks import EarlyStopping
-import matplotlib.pyplot as plt
+from Bio import SeqIO
+from Bio.SeqRecord import SeqRecord
+from Bio.Seq import Seq
    
    
-def load_data(fasta_path, output_dir="./te_aid", dataset_dir="./dataset_autotrim"):
+def load_data(fasta_path, dataset_dir="./dataset_autotrim"):
     
-    os.makedirs(output_dir, exist_ok=True)
-    
-    generation_multiprocessing(fasta_path, 20, output_dir)
+    # Transform sequences from fasta path into TEAid .pdfs
+    generation_multiprocessing(fasta_path)
     
     print("Procesamiento completo.")  
-    
-    if os.path.exists(os.path.abspath("genomes")):
-        shutil.rmtree(os.path.abspath("genomes"))    
-    
+
+    # Create directory to save the dataset    
     os.makedirs(dataset_dir, exist_ok=True)   
     
+    # Create dataset
     cmd = f"""
     source ~/anaconda3/etc/profile.d/conda.sh
     conda activate auto_trimming_agp
-    python -c "from autotrim import create_dataset; create_dataset(r'{fasta_path}', r'{output_dir}', r'{dataset_dir}')"
+    python -c "from dataset_library import create_dataset; create_dataset(r'{fasta_path}', r'{dataset_dir}')"
     """
 
     result = subprocess.run(cmd, shell=True, executable="/bin/bash", capture_output=True, text=True)
@@ -34,14 +33,14 @@ def load_data(fasta_path, output_dir="./te_aid", dataset_dir="./dataset_autotrim
     print(result.stdout)
     print(result.stderr)
 
-def get_model(input_size=(256, 256, 1), classes=128):
+def get_model(input_size=(256, 256, 1), num_classes=128):
 
     # Ramas por canal
     tf.keras.backend.clear_session()
-    cnn_div = ResNet18.build(input_size, classes)
-    cnn_cov = ResNet18.build(input_size, classes)
-    cnn_dot = ResNet18.build(input_size, classes)
-    cnn_str = ResNet18.build(input_size, classes)
+    cnn_div = ResNet18.build(input_size, num_classes)
+    cnn_cov = ResNet18.build(input_size, num_classes)
+    cnn_dot = ResNet18.build(input_size, num_classes)
+    cnn_str = ResNet18.build(input_size, num_classes)
                       
     # Final model
     model = auto_trimming(cnn_div, cnn_cov, cnn_dot, cnn_str)
@@ -93,27 +92,24 @@ def run_experiment(model, train_ds, dev_ds, num_epochs):
 
     return history, checkpoint_callback
 
-    
+# ====================
+# MAIN
+# ====================   
 if __name__ == '__main__':
         
     parser = argparse.ArgumentParser()
-    parser.add_argument("--mode", choices=["train", "test"], required=True, help="Modo de ejecucion")
+    parser.add_argument("--mode", choices=["train", "test", "trimming"], required=True, help="Modo de ejecucion")
     parser.add_argument("--input_fasta", required=True, help="Archivo FASTA de libreria")
     parser.add_argument("--processes", type=int, default=20, help="Numero de procesos paralelos")
-    parser.add_argument("--output_dir", default="te-aid", help="Directorio de salida")
-    parser.add_argument("--dataset_dir", default="dataset_autotrim", help="Directorio del dataset")
+    parser.add_argument("--output_dir", default="te_aid", help="Directorio de salida")
+    parser.add_argument("--dataset_dir", default="dataset_autotrim3", help="Directorio del dataset")
     args = parser.parse_args()
     
-    db_dir = os.path.abspath("db")
-
-    if os.path.exists(db_dir):
-        shutil.rmtree(db_dir)
-
     if args.mode == "train":
     
-        load_data(args.input_fasta, args.output_dir, args.dataset_dir)
+        load_data(args.input_fasta, args.dataset_dir)
 
-        batch_size = 16        # IMPORTANTE
+        batch_size = 16
         num_epochs = 50
         input_size=(256, 256, 1)
         classes=128
@@ -121,27 +117,24 @@ if __name__ == '__main__':
         x_str = os.path.join(args.dataset_dir, "features_data.npy")
         y_str = os.path.join(args.dataset_dir, "labels_data.npy")
     
-        # Cargar SOLO con mmap
+        # Load data using NumPy memory mapping (not loading the full dataset)
         x = np.load(x_str, mmap_mode="r")
         y = np.load(y_str, mmap_mode="r")
     
         print(f"Loaded X shape: {x.shape}")
         print(f"Loaded Y shape: {y.shape}")
     
-        # Split por INDICES (sin copiar datos)
+        # Divide data to create subdatasets for training, test and validation, and save indices
         indices = np.arange(len(y))
         train_idx, test_dev_idx = train_test_split(indices, test_size=0.2, random_state=7)
         dev_idx, test_idx = train_test_split(test_dev_idx, test_size=0.5, random_state=7)  
 
-        #Guardar scaler
-        X_train_for_scaler = np.stack([
-            (x[i].astype(np.float32) / 255.0) for i in train_idx
-        ])
-            
+        # Save scaler
+        X_train_for_scaler = np.stack([(x[i].astype(np.float32) / 255.0) for i in train_idx])            
         scalerX = NDStandardScaler().fit(X_train_for_scaler)
         scalerX.save_model("scalerX")
             
-        # Dataset generator (CLAVE)
+        # TensorFlow dataset generator
         def make_dataset(indices, shuffle=False):
             def gen():
                 for i in indices:
@@ -169,49 +162,30 @@ if __name__ == '__main__':
              .batch(batch_size)\
              .prefetch(tf.data.AUTOTUNE)
     
+        # Create datasets for training, validation and test
         train_ds = make_dataset(train_idx, shuffle=True)
         dev_ds   = make_dataset(dev_idx)
         test_ds  = make_dataset(test_idx)
     
-        # Modelo (IGUAL QUE ANTES)
-        tf.keras.backend.clear_session()
-    
+        # Model for training
+        tf.keras.backend.clear_session()    
         model = get_model(input_size, classes)
 
-        # Entrenamiento
+        # Fit model on training data
         history, checkpoints = run_experiment(
             model,
             train_ds,
             dev_ds,
             num_epochs
         )
-
-        # Guardar metricas
-        for key in ['r2_score', 'val_r2_score', 'r2_starting', 'r2_ending', 'loss', 'val_loss']:
-            if key in history.history:
-                np.save(f"{key}.npy", history.history[key])
-    
+   
         # Plots
-        plt.figure()
-        for label in ['r2_score', 'val_r2_score', 'r2_starting', 'r2_ending']:
-            if label in history.history:
-                plt.plot(history.history[label], label=label)
-        plt.xlabel('Epoch'); plt.ylabel('R2 Score'); plt.title('Epoch vs R2 Score')
-        plt.legend(loc='lower right')
-        plt.savefig('Train_Curve_R2_extended.png', bbox_inches='tight', dpi=500)
-        plt.close()
-    
-        plt.figure()
-        plt.plot(history.history['loss'], label='train_loss')
-        plt.plot(history.history['val_loss'], label='val_loss')
-        plt.xlabel('Epoch'); plt.ylabel('Loss'); plt.title('Epoch vs Loss')
-        plt.legend(loc='upper right')
-        plt.savefig('Train_Curve_Loss.png', bbox_inches='tight', dpi=500)
-        plt.close()            
+        plot_training_metrics(history)           
         
         # Guardar modelo entrenado
         model.save('trained_model.h5')
-                       
+
+        # Save data for testing            
         X_test = []
         Y_test = []
             
@@ -244,10 +218,65 @@ if __name__ == '__main__':
             print(ch.shape, ch.dtype)
         print("Y_test shape:", Y_test.shape, Y_test.dtype)
             
-        # Guardar arrays
+        # Save arrays
         np.save("X_test.npy", X_test, allow_pickle=True)
         np.save("Y_test.npy", Y_test)
     
     if args.mode == "test":
     
-        testing_model("trained_model.h5", "X_test.npy", "Y_test.npy")
+        dataset_dir = "./dataset_predictions"
+        predictions = test_model("./models/resnet18_dropout_nokernel/trained_model.h5", "./models/resnet18_dropout_nokernel/scalerX.bin", dataset_dir)
+
+        print(predictions)
+
+    if args.mode == "trimming":
+
+        dataset_dir = "dataset_autotrim"
+        output_fasta = "curated_seq.txt"
+        #load_data(args.input_fasta, dataset_dir)
+
+        dataX_path = os.path.join(dataset_dir, "features_data.npy")
+        dataY_path = os.path.join(dataset_dir, "labels_data.npy")
+        TE_ids = np.load(os.path.join(dataset_dir, "case_labels.npy"), allow_pickle=True)
+
+        predictions = test_model("./models/resnet18_dropout_nokernel/trained_model.h5", "./models/resnet18_dropout_nokernel/scalerX.bin", dataset_dir)
+
+        print(predictions)
+        # Cargar secuencias originales
+        sequences = list(SeqIO.parse(args.input_fasta, "fasta"))
+
+        cut_records = []
+
+        TE_size = 15000
+        for i, pred in enumerate(predictions):
+            TE_id = TE_ids[i]
+            print({TE_id})
+            start = int(pred[0] * TE_size)
+            print({start})
+            end = int(pred[1] * TE_size)
+            print({end})
+
+            # Get the SeqRecord with matching id
+            record = next((rec for rec in sequences if rec.id.startswith(TE_id)), None)
+
+            for rec in sequences[:5]:
+                print(rec.id)
+                print(rec.description)
+
+            if record is None:
+                print(f"TE_id {TE_id} not found in sequences")
+                continue
+
+            curated_seq = record.seq[start:end]
+
+            new_record = SeqRecord(
+                Seq(curated_seq),
+                id=TE_id,
+                description=f"cut from {start} to {end}"
+            )
+            cut_records.append(new_record)
+
+        print(f"Saving {len(cut_records)} cut sequences to {output_fasta}...")
+        SeqIO.write(cut_records, output_fasta, "fasta")
+        print("Done!")
+        
