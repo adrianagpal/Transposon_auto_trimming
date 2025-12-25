@@ -1,31 +1,21 @@
 # -*- coding: utf-8 -*-
 import os
-import sys
-import re
 from typing import List, Tuple
 from pickle import dump, load
 
 # For data and plotting 
-import pandas as pd
 import matplotlib.pyplot as plt
-from Bio import SeqIO
 import numpy as np
-import cv2
 
 # Sklearn
-from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import r2_score
 from sklearn.base import TransformerMixin
 
 # TensorFlow / Keras
 import tensorflow as tf
-from tensorflow.keras import layers, backend as K
 from tensorflow.keras.models import Model
 from tensorflow.keras.layers import Input, Add, Dense, Activation, ZeroPadding2D, BatchNormalization, Flatten, Conv2D, AveragePooling2D, MaxPooling2D, GlobalMaxPooling2D, GlobalAveragePooling2D, Dropout
-from tensorflow.keras.utils import plot_model
-from tensorflow.keras.callbacks import EarlyStopping
-from focal_loss import BinaryFocalLoss
 
 # GPU config
 os.environ["CUDA_VISIBLE_DEVICES"] = "0"
@@ -275,11 +265,14 @@ def auto_trimming(cnn_div, cnn_cov, cnn_dot, cnn_str):
 
 def testing_model(model_path, dataX_path, dataY_path):
     # Load X_test (tuple of 4 arrays) and Y_test
-    X_test_tuple = np.load(dataX_path, allow_pickle=True) 
+    X_test = np.load(dataX_path) 
     Y_test = np.load(dataY_path).astype(np.float32) 
 
+    X_test = X_test / 255.0
+    X_test = X_test.astype(np.float32)    
+
     # Combine channels in an array (N, H, W, 4)
-    X_test = np.concatenate(X_test_tuple, axis=-1)  
+    #X_test = np.concatenate(X_test_tuple, axis=-1)  
 
     print(f"X_test shape: {X_test.shape}, Y_test shape: {Y_test.shape}")
     print(f"NaNs en X_test: {np.isnan(X_test).sum()}, Y_test: {np.isnan(Y_test).sum()}")
@@ -299,16 +292,187 @@ def testing_model(model_path, dataX_path, dataY_path):
     print("predictions shape:", predictions.shape)
 
     # Calculate R2
-    r2_initial = plot_results(Y_test[:, 0], predictions[:, 0], "StartingPos")
-    r2_final = plot_results(Y_test[:, 1], predictions[:, 1], "EndingPos")
+    r2_initial = plot_r2(Y_test[:, 0], predictions[:, 0], "StartingPos")
+    r2_final = plot_r2(Y_test[:, 1], predictions[:, 1], "EndingPos")
     print("R2 starting position:" + str(r2_initial))
     print("R2 ending position:" + str(r2_final))
 
     return predictions
 
+def plot_r2(real, predicted, name):
 
-def plot_results(real, predicted, name):
-    print(f"Calculating R2 for {name}...")
+    # Verify real and predictions data shapes match
+    if real.shape != predicted.shape:
+        raise ValueError("Shapes of real and predicted do not match.")
+    
+    # Calculate determination coefficient
+    r2 = r2_score(real, predicted)
+
+    # Plots
+    plt.figure(figsize=(8, 6))
+    plt.scatter(real, predicted, label='Datos')
+    plt.plot(real, real, label=f'y = x  (R² = {r2:.2f})')
+    plt.xlabel('Real')
+    plt.ylabel('Predicted')
+    plt.title(f'Gráfico de dispersión con R² - {name}')
+    plt.legend()
+    plt.grid(True)
+    plt.savefig(f'r2_{name}.png', bbox_inches='tight', dpi=500)
+    plt.close()
+
+def plot_training_metrics(history):
+
+    plt.figure()
+    plt.plot(history.history['r2_score'])
+    plt.plot(history.history['val_r2_score'])
+    plt.xlabel('Epoch')
+    plt.ylabel('R²')
+    plt.title('Training and validation R²')
+    plt.legend()
+    plt.savefig('Train_Curve_R2.png', dpi=500, bbox_inches='tight')
+    plt.close()
+    
+    plt.figure()
+    plt.plot(history.history['loss'], label='train_loss')
+    plt.plot(history.history['val_loss'], label='val_loss')
+    plt.xlabel('Epoch'); plt.ylabel('Loss'); plt.title('Epoch vs Loss')
+    plt.legend(loc='upper right')
+    plt.savefig('Train_Curve_Loss.png', bbox_inches='tight', dpi=500)
+    plt.close()  
+
+def test_model(model_path, scalerx_path, data_path):
+
+    import pandas as pd
+    import re
+    from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
+
+    # === Load data ===
+    X_test = np.load(os.path.join(data_path, "features_data.npy"))
+    X_test = X_test / 255.0
+    X_test = X_test.astype(np.float32)    
+    
+    Y_test = np.load(os.path.join(data_path, "labels_data.npy")).astype(np.float32)
+    case_labels = np.load(os.path.join(data_path, "case_labels.npy"))
+    
+    sample_names = np.arange(X_test.shape[0])
+    
+    unique_cases = np.unique(case_labels)
+    print(f"{unique_cases}")
+    metrics = {}
+
+    sample_names = np.arange(X_test.shape[0])
+    output_dir = "./results_cases"
+    os.makedirs(output_dir, exist_ok=True)
+    
+    print("X_test raw:", np.min(X_test), np.max(X_test))
+    print("Y_test raw:", np.min(Y_test), np.max(Y_test))
+    print("X_test shape:", X_test.shape)
+    print("Y_test shape:", Y_test.shape)
+    print("NaNs in X_test:", np.isnan(X_test).sum())
+    print("NaNs in Y_test:", np.isnan(Y_test).sum())
+    
+    # === Load scaler ===
+    scalerX = NDStandardScaler()
+    scalerX.load_model(scalerx_path, X_test)
+    X1_test_scl = scalerX.transform(X_test)
+    
+    print("NaNs in X1_test_scl after scaling:", np.isnan(X1_test_scl).sum())
+
+    # === Load model ===
+    model = tf.keras.models.load_model(
+        model_path,
+        custom_objects={
+            'LeakyReLU': tf.keras.layers.LeakyReLU(0.1),
+            'r2_score': r2_score
+        }
+    )
+
+    # === Predict ===
+    predictions = model.predict(
+        [
+            X1_test_scl[:, :, :, 0],
+            X1_test_scl[:, :, :, 1],
+            X1_test_scl[:, :, :, 2],
+            X1_test_scl[:, :, :, 3]
+        ],
+        verbose=0
+    )
+    predictions = np.nan_to_num(predictions, nan=0)
+    
+    print("NaNs in predictions:", np.isnan(predictions).sum())
+    print("predictions shape:", predictions.shape)
+
+    """for case in unique_cases:
+    
+        case = re.sub(r'[\\/:"*?<>|#]', '_', case)
+    
+        idx = np.where(case_labels == case)[0]
+        
+        print(f"{idx}")
+        
+        if len(idx) == 0:
+            print(f"Warning: No samples found for case '{case}', skipping...")
+            continue
+        
+        y_true = Y_test[idx]
+        print(f"{y_true}")
+        y_pred = predictions[idx]
+        print(f"{y_pred}")
+    
+        mse = mean_squared_error(y_true, y_pred)
+        mae = mean_absolute_error(y_true, y_pred)
+        r2 = r2_score(y_true, y_pred)
+    
+        metrics[case] = {"MSE": mse, "MAE": mae, "R2": r2}
+        print(f"Case {case}: MSE={mse:.4f}, MAE={mae:.4f}, R2={r2:.4f}")
+    
+        # --- Scatter plot por caso ---
+        plt.figure(figsize=(6,6))
+    
+        # Output 0
+        plt.scatter(y_true[:, 0], y_pred[:, 0], alpha=0.6, color='blue', label='Output0')
+        # Output 1
+        plt.scatter(y_true[:, 1], y_pred[:, 1], alpha=0.6, color='green', marker='x', label='Output1')
+    
+        # Linea de referencia y=x
+        min_val = min(y_true.min(), y_pred.min())
+        max_val = max(y_true.max(), y_pred.max())
+        plt.plot([min_val, max_val], [min_val, max_val], color='red', linestyle='--', label='y=x')
+    
+        plt.title(f"Caso {case}")
+        plt.xlabel("Real")
+        plt.ylabel("Predicho")
+        plt.legend()
+        plt.grid(True)
+        plt.tight_layout()
+        plt.savefig(os.path.join(output_dir, f"scatter_case_{case}.png"))
+        plt.close()
+    
+        # --- Calcular R2 por posicion ---
+        r2_initial = calcular_y_graficar_r23(Y_test[idx, 0], predictions[idx, 0], f"StartingPos_{case}")
+        r2_final = calcular_y_graficar_r23(Y_test[idx, 1], predictions[idx, 1], f"EndingPos_{case}")
+    
+        print(f"R2 starting position_{case}: {r2_initial:.4f}")
+        print(f"R2 ending position_{case}: {r2_final:.4f}")"""
+    
+    df = pd.DataFrame({
+    "Sample": sample_names,
+    **{f"Real_Output{i}": Y_test[:, i] for i in range(Y_test.shape[1])},
+    **{f"Pred_Output{i}": predictions[:, i] for i in range(predictions.shape[1])}
+    })
+    df.to_csv(os.path.join(output_dir, "predicciones_metrics.csv"), index=False)
+
+    # === Guardar resumen de metricas ===
+    metrics_df = pd.DataFrame(metrics).T
+    metrics_df.to_csv(os.path.join(output_dir, "metrics_summary.csv"), index=True)
+
+    print(f"\nPredicciones guardadas en '{os.path.join(output_dir, 'predicciones_metrics.csv')}'")
+    print(f"Resumen de metricas guardado en '{os.path.join(output_dir, 'metrics_summary.csv')}'")
+
+    return predictions
+
+def calcular_y_graficar_r23(real, predicted, nombre):
+    print(f"Calculating R2 for {nombre}...")
     print(f"NaNs in real: {np.isnan(real).sum()}, NaNs in predicted: {np.isnan(predicted).sum()}")
     print(f"real shape: {real.shape}, predicted shape: {predicted.shape}")
 
@@ -325,9 +489,7 @@ def plot_results(real, predicted, name):
     plt.plot(real, real, color='red', label=f'Referencia (y=x, R^2 = {r2:.2f})')
     plt.xlabel('Real')
     plt.ylabel('Predicted')
-    plt.title('Grafico de dispersion con R^2 - ' + name)
+    plt.title('Grafico de dispersion con R^2 - ' + nombre)
     plt.legend()
     plt.grid(True)
-    plt.savefig('r2_' + name + '.png', bbox_inches='tight', dpi=500)
-
-    return r2
+    plt.savefig('r2_' + nombre + '.png', bbox_inches='tight', dpi=500)
