@@ -331,7 +331,7 @@ def create_dataset(library, MCH_out, outputDir):
             else:
                 labels[n, 1] = end_pos / 15000
             
-            case_names.append(case_id)
+            case_names.append(TE.id)
             species_names.append(species_name)
             
             print(f"n: {n}")
