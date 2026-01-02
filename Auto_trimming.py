@@ -1,7 +1,7 @@
 import os, subprocess
 import argparse
 from dataset_library import generation_multiprocessing
-from model_library import ResNet18, auto_trimming, NDStandardScaler, testing_model, plot_training_metrics, test_model
+from model_library import ResNet18, auto_trimming, NDStandardScaler, testing_model, plot_training_metrics, test_model, r2_score
 import numpy as np
 from sklearn.model_selection import train_test_split
 import tensorflow as tf
@@ -76,7 +76,7 @@ def run_experiment(model, train_ds, dev_ds, num_epochs):
     # Early stopping
     early_stopping = EarlyStopping(
         monitor='val_loss',
-        patience=50,
+        patience=20,
         restore_best_weights=True,
         verbose=1
     )
@@ -102,15 +102,15 @@ if __name__ == '__main__':
     parser.add_argument("--input_fasta", required=True, help="Archivo FASTA de libreria")
     parser.add_argument("--processes", type=int, default=20, help="Numero de procesos paralelos")
     parser.add_argument("--output_dir", default="te_aid", help="Directorio de salida")
-    parser.add_argument("--dataset_dir", default="dataset_autotrim3", help="Directorio del dataset")
+    parser.add_argument("--dataset_dir", default="dataset_30000", help="Directorio del dataset")
     args = parser.parse_args()
     
     if args.mode == "train":
     
-        load_data(args.input_fasta, args.dataset_dir)
+        #load_data(args.input_fasta, args.dataset_dir)
 
         batch_size = 16
-        num_epochs = 50
+        num_epochs = 200
         input_size=(256, 256, 1)
         classes=128
     
@@ -225,7 +225,21 @@ if __name__ == '__main__':
     if args.mode == "test":
     
         dataset_dir = "./dataset_predictions"
+        
+        model = tf.keras.models.load_model(
+          "./models/resnet18_dropout_nokernel/trained_model.h5",
+          custom_objects={"r2_score": r2_score},
+          compile = False
+        )
+    
         predictions = test_model("./models/resnet18_dropout_nokernel/trained_model.h5", "./models/resnet18_dropout_nokernel/scalerX.bin", dataset_dir)
+        
+        tf.keras.utils.plot_model(
+        model,
+        to_file='model_plot.png',
+        show_shapes=True,
+        show_layer_names=True
+    )
 
         print(predictions)
 
@@ -279,4 +293,3 @@ if __name__ == '__main__':
         print(f"Saving {len(cut_records)} cut sequences to {output_fasta}...")
         SeqIO.write(cut_records, output_fasta, "fasta")
         print("Done!")
-        
