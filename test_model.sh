@@ -17,4 +17,4 @@ export TF_GPU_ALLOCATOR=cuda_malloc_async
 
 source /shared/home/sorozcoarias/anaconda3/bin/activate training_agp
 
-/shared/ifbstor1/projects/tagua_gen_ec/anaconda3_homesimon/envs/training_agp/bin/python3 test_model.py ./models/new_VGG16_BN/trained_model.h5 ./models/new_VGG16_BN/scalerX.bin ./dataset_pred_grande
+/shared/ifbstor1/projects/tagua_gen_ec/anaconda3_homesimon/envs/training_agp/bin/python3 test_model.py ./dataset_30000/trained_model.h5 ./dataset_30000/scalerX.bin ./dataset_predictions
