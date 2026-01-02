@@ -9,7 +9,7 @@ from sklearn.base import TransformerMixin
 from joblib import dump, load
 import pandas as pd
 import matplotlib.pyplot as plt
-import argparse
+import argparse, re
 
 # === Clase NDStandardScaler ===
 class NDStandardScaler(TransformerMixin):
@@ -156,8 +156,16 @@ def testing_models2(model_path, scalerx_path, data_path):
     
     for case in unique_cases:
     
+        case = re.sub(r'[\\/:"*?<>|#]', '_', case)
+    
         idx = np.where(case_labels == case)[0]
+        
         print(f"{idx}")
+        
+        if len(idx) == 0:
+            print(f"Warning: No samples found for case '{case}', skipping...")
+            continue
+        
         y_true = Y_test[idx]
         print(f"{y_true}")
         y_pred = predictions[idx]
