@@ -18,7 +18,9 @@ sbatch data_generation/run_generation.sh
 --fasta: Path to FASTA file from which simulated data will be generated (required)
 --seq_per_case: number of sequences to generate per case (4 cases)
 
+```
 sbatch auto_trimming.sh
+```
 
 ## Create a dataset
 This is the initial step for training, testing or trimming. 
