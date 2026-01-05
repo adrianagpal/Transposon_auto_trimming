@@ -6,70 +6,98 @@ First of all, create 3 environments according to requirements: auto_trimming_agp
 dataset_library.py contains functions to generate PDFs and images from an fasta file. 
 headers need to include the species at the end, separated by a space from the rest of the header. In this way, the species will be recognized and its genome will be downloaded, which is need to run TEAid. 
 
+## Pipeline workflow
+This computational tool offers two options:
+- Option 1: Training a model and testing with synthetic data, generated, for example, from a curated library of TE sequences.
+- Option 2: TE trimming from an input FASTA file containing sequences to curate.
 
-## Generation of simulated data
-For data generation, headers need to include the species at the end, separated by a space from the rest of the header. 
-This will generate sequences with one or two TEs combined with randomly generated DNA sequences of a total length of 15000 bp. This script does not require an environment in particular.
-Example:
-
->DR000395818#CLASSI/LINE/CR1 Bucorvus abyssinicus
->
-From this file, that can be, for example, a curated library, we will run the script:
-
-sbatch data_generation/run_generation.sh
-### executes data_generation/GenerationData.py
-
-### Parameters
---fasta: Path to FASTA file from which simulated data will be generated (required)
---seq_per_case: number of sequences to generate per case (4 cases)
-
-## Create images from FASTA file with TE-Aid
-This script requires the environment teaid_agp. 
+For both options, FASTA headers must follow a specific format, with the species indicated at the end of the header, separated by a space from the rest of the text. Example:
 ```
+>DR000395818#CLASSI/LINE/CR1 Bucorvus abyssinicus
+```
+
+### Option 1: Generation of synthetic data
+This option generates sequences containing one or two TEs, combined with randomly generated DNA sequences, for a total length of 15,000 bp. This script does not require a specific environment.
+
+**Batch processing (HPC/SLURM):**
+```batch
+sbatch data_generation/run_generation.sh
+```
+**Executes** `data_generation/GenerationData.py`
+
+**Output**
+It will generate a FASTA file `simulated_data_merged.fasta`.
+
+**Parameters**
+- `--fasta`: Path to FASTA file from which synthetic data will be generated (required)
+- `--seq_per_case`: number of sequences to generate per case (4 cases)
+
+For next steps after synthetic data generation, the `teaid_agp` environment is required.
+
+### Create images from FASTA file with TE-Aid
+For this step, the following scripts from Goubert et al. (2022) are needed: TE-Aid, Run-c2g.R, consensus2genome.R and blastndotplot.R.
+By default, they will be included in the folder `TEAid`.
+
+**Batch processing (HPC/SLURM):**
+```batch
 sbatch run_teaid.sh
 ```
-### executes Auto_trimming.py with --mode teaid
+**Executes** `Auto_trimming.py with --mode teaid`
 
-### Parameters
---input_fasta: Path to FASTA file from which the images will be created (required)
+**Parameters**
+- `--input_fasta`: Path to FASTA file from which the images will be created (required)
 
-Requires environment teaid_agp
+**Output**
+It will create a folder called `te_aid`, in which the PDF files and images will be generated. 
 
-The following scripts are needed: TE-Aid, Run-c2g.R, consensus2genome.R and blastndotplot.R (by default, they will be included in the folder TEAid).
+### Create a dataset
 
-### Output
-It will create a folder called te_aid, in which the PDF files and images will be generated. 
-
-## Create a dataset
-This will generate 4 matrices: features_data.npy, labels_data.npy
-
-```
+**Batch processing (HPC/SLURM):**
+```batch
 sbatch create_dataset.sh
 ```
-### Parameters
---input_fasta: Path to FASTA file from which the dataset will be created (required)
---dataset_dir: Directory where the dataset will be saved
+**Executes** `Auto_trimming.py with --mode dataset`
 
-After generating the PDFs (and images) and the dataset, we can choose in the script Auto_trimming.py if we want to do training, testing or trimming. 
+**Parameters**
+- `--input_fasta`: Path to FASTA file from which the dataset will be created (required)
+- `--dataset_dir`: Directory where the dataset will be saved
 
-## Trimming
+**Output**
+In the specified directory, this will generate 4 Numpy matrices: features_data.npy, labels_data.npy, case_labels.npy and species_labels.npy.
+
+After generating the PDFs (and images) and the dataset, we can choose in the script Auto_trimming.py if we want to do training or testing (for option 1) or trimming (for option 2). 
+
+**Batch processing (HPC/SLURM):**
+```batch
+sbatch auto_trimming.sh
+```
+
+### Training
+
+**Executes** `Auto_trimming.py with --mode train`
+
+**Parameters**
+- `--dataset_dir`: Directory where the dataset is saved
+
+**Output**
+
+
+### Testing
+
+**Executes** `Auto_trimming.py with --mode test`
+
+**Parameters**
+- `--dataset_dir`: Directory where the dataset is saved
+- `--model`:
+- `--scaler`:
+
+### Trimming
 Previously, we will need to generate the dataset from the FASTA files with the sequences that we want to trim. This will generate a .txt file where the trimmed sequences will be saved with the original header name (until # symbol) and indicates the positions in which the sequence was cut.
 
-### Parameters
---input_fasta: Path to FASTA file from which the dataset was created (required)
---dataset_dir: Directory where the dataset is saved
---model:
---scaler
+**Executes** `Auto_trimming.py with --mode trimming`
 
-## Training
-
-### Parameters
---dataset_dir: Directory where the dataset is saved
-
-## Testing
-
-# Parameters
---dataset_dir: Directory where the dataset is saved
---model:
---scaler
-
+**Parameters**
+- `--input_fasta`: Path to FASTA file from which the dataset was created (required)
+- `--dataset_dir`: Directory where the dataset is saved
+- `--model`:
+- `--scaler`:
